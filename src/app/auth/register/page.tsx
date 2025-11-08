@@ -23,8 +23,8 @@ export default function RegisterPage() {
 
     // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (event, session) => {
-        if (event === 'SIGNED_UP' || event === 'SIGNED_IN') {
+      (event) => {
+        if (event === 'SIGNED_IN') {
           router.push('/dashboard')
         }
       }

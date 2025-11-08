@@ -1,0 +1,51 @@
+feat: Automatic Meteora DLMM Position Tracking with Accurate P&L (v1.1.0)
+
+🎉 MAJOR MILESTONE: Fully automated wallet scanning and transaction tracking for Meteora DLMM positions
+
+✨ Features Added:
+- Automatic wallet scanning (enter wallet address once, track everything)
+- Comprehensive transaction detection (opens, closes, fee claims, rebalances)
+- Accurate USD-based P&L calculation per position
+- Transaction timeline with detailed token amounts
+- Position status tracking (Active/Closed/Out of Range)
+- Data persistence across page refreshes
+- Clear & Re-sync functionality
+
+🐛 Critical Bugs Fixed:
+1. Position NFT Extraction: Prioritize token-holding accounts for consistent NFT address across all related transactions
+2. Token Balance Detection: Only count actual balance changes, not accounts with zero change
+3. RPC Environment Loading: Dynamic RPC URL loading with Helius fallback for Turbopack
+
+🔧 Technical Implementation:
+- Transaction Parser: Multi-strategy detection and classification (meteora-transaction-parser.ts)
+- RPC Integration: Batch fetching with exponential backoff retry (solana-rpc.ts)
+- Database: position_transactions table with optimized indexes
+- API Routes: /api/wallet/sync-meteora and /api/wallet/clear-transactions
+- Frontend: Expandable position cards with transaction timelines
+
+✅ Verified Test Case:
+- Wallet: 8bCupLv3n8u9tToLBJ3e1SNL5p5oSyMPz9Mr3j8ZkbYR
+- Expected P&L: +$22.38 (+5.74%)
+- Result: ✅ ACCURATE - All values correct!
+
+📊 Performance:
+- Sync Time: ~35-50 seconds for 50 transactions
+- RPC: Helius free tier (2 req/sec)
+- Rate Limits: Handled with retry logic
+- Database: Indexed for fast queries
+
+🚀 This is a STABLE CHECKPOINT - All core features working correctly!
+
+Files Changed:
+- src/lib/meteora-transaction-parser.ts (transaction detection and parsing)
+- src/lib/solana-rpc.ts (RPC integration with retry logic)
+- src/app/api/wallet/sync-meteora/route.ts (wallet sync endpoint)
+- src/app/api/wallet/clear-transactions/route.ts (clear transaction history)
+- src/app/dashboard/positions/page.tsx (main UI with transaction timeline)
+- supabase-position-transactions-table.sql (database schema)
+- RELEASE_NOTES_v1.1.0_METEORA_TRACKING.md (comprehensive release documentation)
+- QUICK_START_v1.1.0.md (quick reference guide)
+
+
+
+

@@ -164,6 +164,6 @@ export class PositionTracker {
 
 // Create singleton instance
 export const positionTracker = new PositionTracker(
-  process.env.NEXT_PUBLIC_SOLANA_RPC_URL || 'https://solana-mainnet.g.alchemy.com/v2/demo'
+  process.env.NEXT_PUBLIC_SOLANA_RPC_URL || 'https://solana-mainnet.rpc.extrnode.com'
 )
 

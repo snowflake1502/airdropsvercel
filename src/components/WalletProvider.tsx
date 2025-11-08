@@ -21,7 +21,7 @@ export const WalletContextProvider: FC<WalletContextProviderProps> = ({ children
   // Use a more reliable public RPC endpoint
   const endpoint = useMemo(() => {
     // Try to use custom RPC from env, fallback to public endpoints
-    return process.env.NEXT_PUBLIC_SOLANA_RPC_URL || 'https://solana-mainnet.g.alchemy.com/v2/demo'
+    return process.env.NEXT_PUBLIC_SOLANA_RPC_URL || 'https://solana-mainnet.rpc.extrnode.com'
   }, [network])
 
   const wallets = useMemo(

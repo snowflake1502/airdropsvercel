@@ -23,7 +23,7 @@ export default function LoginPage() {
 
     // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (event, session) => {
+      (event) => {
         if (event === 'SIGNED_IN') {
           router.push('/dashboard')
         }
