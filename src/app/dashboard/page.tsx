@@ -29,6 +29,7 @@ interface BestOpportunity {
   minInvestmentUSD: number
   airdropPotential: 'confirmed' | 'high' | 'medium' | 'low'
   estimatedAirdropValue?: string
+  estimatedAirdropDate?: string // e.g., "Q1 2025", "TBD", "Confirmed - TBA"
   actionUrl?: string
   priority: number
 }
@@ -219,6 +220,7 @@ export default function DashboardPage() {
         minInvestmentUSD: 50,
         airdropPotential: 'confirmed',
         estimatedAirdropValue: '$500-$2000',
+        estimatedAirdropDate: 'Q1 2025 (Confirmed)',
         priority: 1
       },
       {
@@ -228,6 +230,7 @@ export default function DashboardPage() {
         minInvestmentUSD: 100,
         airdropPotential: 'high',
         estimatedAirdropValue: '$1000-$5000',
+        estimatedAirdropDate: 'Q2 2025 (Expected)',
         priority: 2
       },
       {
@@ -237,6 +240,7 @@ export default function DashboardPage() {
         minInvestmentUSD: 200,
         airdropPotential: 'high',
         estimatedAirdropValue: '$500-$3000',
+        estimatedAirdropDate: 'Q2-Q3 2025 (Expected)',
         priority: 3
       },
       {
@@ -246,6 +250,7 @@ export default function DashboardPage() {
         minInvestmentUSD: 50,
         airdropPotential: 'medium',
         estimatedAirdropValue: '$200-$1000',
+        estimatedAirdropDate: 'TBD',
         priority: 4
       },
       {
@@ -255,6 +260,7 @@ export default function DashboardPage() {
         minInvestmentUSD: 150,
         airdropPotential: 'high',
         estimatedAirdropValue: '$800-$4000',
+        estimatedAirdropDate: 'Q2-Q3 2025 (Expected)',
         priority: 5
       },
       {
@@ -264,6 +270,7 @@ export default function DashboardPage() {
         minInvestmentUSD: 100,
         airdropPotential: 'medium',
         estimatedAirdropValue: '$300-$1500',
+        estimatedAirdropDate: 'TBD',
         priority: 6
       }
     ]
@@ -708,29 +715,129 @@ export default function DashboardPage() {
               <div className="space-y-2 text-sm">
                 <div className="flex items-center gap-2">
                   <span className="text-green-600">✅</span>
-                  <span>Auto-claim fees when ≥ $5 (max once per 24h)</span>
+                  <span className="text-gray-900">Auto-claim fees when ≥ $5 (max once per 24h)</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-green-600">✅</span>
-                  <span>Auto-rebalance out-of-range positions (6h cooldown)</span>
+                  <span className="text-gray-900">Auto-rebalance out-of-range positions (6h cooldown)</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-green-600">✅</span>
-                  <span>Monitor positions and track activity for airdrop eligibility</span>
+                  <span className="text-gray-900">Monitor positions and track activity for airdrop eligibility</span>
                 </div>
                 {personalizedPlan && personalizedPlan.recommendedProtocols.length > 0 && (
                   <div className="flex items-center gap-2">
                     <span className="text-blue-600">⏳</span>
-                    <span>Auto-open positions enabled (requires manual approval for large amounts)</span>
+                    <span className="text-gray-900">Auto-open positions enabled (requires manual approval for large amounts)</span>
                   </div>
                 )}
               </div>
               <div className="mt-4 pt-4 border-t border-green-200">
-                <p className="text-xs text-gray-600">
+                <p className="text-xs text-gray-900">
                   💡 Automation runs every 5 minutes. Check the <Link href="/dashboard/activities" className="text-green-600 hover:underline">Activities</Link> page for execution logs.
                 </p>
               </div>
             </div>
+
+            {/* Active Farming Protocols */}
+            {personalizedPlan && personalizedPlan.recommendedProtocols.length > 0 && (
+              <div className="mt-6 bg-white rounded-lg p-4 border border-green-200">
+                <h3 className="font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                  🌾 Active Farming Protocols & Plan
+                </h3>
+                <div className="space-y-3">
+                  {personalizedPlan.recommendedProtocols.map((rec, idx) => {
+                    // Find matching opportunity for airdrop date
+                    const opportunity = bestOpportunities.find(opp => opp.protocol === rec.protocol)
+                    // Check if protocol is actively being farmed
+                    const activeProtocol = activeProtocols.find(ap => ap.name === rec.protocol)
+                    const isActive = activeProtocol?.status === 'active'
+                    
+                    return (
+                      <div
+                        key={idx}
+                        className="bg-gradient-to-r from-gray-50 to-white rounded-lg p-4 border border-gray-200 hover:border-green-300 transition-colors"
+                      >
+                        <div className="flex items-start justify-between">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-3 mb-2">
+                              <span className="text-xl font-bold text-gray-700">#{rec.priority}</span>
+                              <h4 className="font-semibold text-gray-900 text-lg">{rec.protocol}</h4>
+                              {isActive && (
+                                <span className="px-2 py-1 text-xs font-medium rounded-full bg-green-100 text-green-800 border border-green-300">
+                                  🟢 Active
+                                </span>
+                              )}
+                              {!isActive && (
+                                <span className="px-2 py-1 text-xs font-medium rounded-full bg-yellow-100 text-yellow-800 border border-yellow-300">
+                                  ⏳ Pending
+                                </span>
+                              )}
+                            </div>
+                            <div className="ml-8 space-y-1">
+                              <div className="flex items-center gap-2 text-sm">
+                                <span className="text-gray-600">Plan Investment:</span>
+                                <span className="font-semibold text-gray-900">${rec.investmentUSD.toFixed(2)}</span>
+                              </div>
+                              {activeProtocol && (
+                                <div className="flex items-center gap-2 text-sm">
+                                  <span className="text-gray-600">Current Positions:</span>
+                                  <span className="font-semibold text-gray-900">
+                                    {activeProtocol.positionsCount} position{activeProtocol.positionsCount !== 1 ? 's' : ''}
+                                  </span>
+                                  <span className="text-gray-400">•</span>
+                                  <span className="text-gray-600">Value:</span>
+                                  <span className="font-semibold text-gray-900">${activeProtocol.totalValueUSD.toFixed(2)}</span>
+                                </div>
+                              )}
+                              {opportunity && (
+                                <div className="flex items-center gap-2 text-sm">
+                                  <span className="text-gray-600">Airdrop Date:</span>
+                                  <span className={`font-semibold ${
+                                    opportunity.airdropPotential === 'confirmed' 
+                                      ? 'text-green-700' 
+                                      : opportunity.airdropPotential === 'high'
+                                      ? 'text-blue-700'
+                                      : 'text-gray-700'
+                                  }`}>
+                                    {opportunity.estimatedAirdropDate || 'TBD'}
+                                  </span>
+                                  {opportunity.estimatedAirdropValue && (
+                                    <>
+                                      <span className="text-gray-400">•</span>
+                                      <span className="text-gray-600">Est. Value:</span>
+                                      <span className="font-semibold text-green-700">{opportunity.estimatedAirdropValue}</span>
+                                    </>
+                                  )}
+                                </div>
+                              )}
+                              <div className="text-xs text-gray-500 mt-1">
+                                {rec.reason}
+                              </div>
+                            </div>
+                          </div>
+                          <div className="text-right ml-4">
+                            {opportunity && (
+                              <div className={`px-3 py-1 text-xs font-semibold rounded-full border ${
+                                opportunity.airdropPotential === 'confirmed'
+                                  ? 'bg-green-100 text-green-800 border-green-300'
+                                  : opportunity.airdropPotential === 'high'
+                                  ? 'bg-blue-100 text-blue-800 border-blue-300'
+                                  : opportunity.airdropPotential === 'medium'
+                                  ? 'bg-yellow-100 text-yellow-800 border-yellow-300'
+                                  : 'bg-gray-100 text-gray-800 border-gray-300'
+                              }`}>
+                                {opportunity.airdropPotential === 'confirmed' ? '✅ Confirmed' : opportunity.airdropPotential}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
           </div>
         )}
 
