@@ -36,12 +36,17 @@ export default function WalletManager({
     fetchWallets()
   }, [])
 
-  // Auto-add connected wallet
+  // Auto-add connected wallet (only when wallets are loaded)
   useEffect(() => {
-    if (connected && publicKey) {
-      addConnectedWallet(publicKey.toBase58())
+    if (connected && publicKey && !loading && wallets.length >= 0) {
+      // Small delay to ensure wallets are loaded first
+      const timer = setTimeout(() => {
+        addConnectedWallet(publicKey.toBase58())
+      }, 500)
+      return () => clearTimeout(timer)
     }
-  }, [connected, publicKey])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connected, publicKey, loading])
 
   const fetchWallets = async () => {
     try {
@@ -70,33 +75,77 @@ export default function WalletManager({
       const {
         data: { user },
       } = await supabase.auth.getUser()
-      if (!user) return
+      if (!user) {
+        console.log('No user found, skipping wallet addition')
+        return
+      }
 
       // Check if wallet already exists
       const existing = wallets.find((w) => w.wallet_address === address)
       if (existing) {
-        // Update to mark as connected
-        await supabase
-          .from('tracked_wallets')
-          .update({ is_connected: true })
-          .eq('id', existing.id)
-        
-        fetchWallets()
+        // Update to mark as connected (only if not already connected)
+        if (!existing.is_connected) {
+          const { error: updateError } = await supabase
+            .from('tracked_wallets')
+            .update({ is_connected: true })
+            .eq('id', existing.id)
+          
+          if (updateError) {
+            console.error('Error updating wallet connection status:', updateError)
+            return
+          }
+          fetchWallets()
+        }
         return
       }
 
       // Add new connected wallet
-      const { error } = await supabase.from('tracked_wallets').insert({
-        user_id: user.id,
-        wallet_address: address,
-        nickname: 'Connected Wallet',
-        is_connected: true,
-      })
+      const { data, error } = await supabase
+        .from('tracked_wallets')
+        .insert({
+          user_id: user.id,
+          wallet_address: address,
+          nickname: 'Connected Wallet',
+          is_connected: true,
+        })
+        .select()
 
-      if (error) throw error
-      fetchWallets()
-    } catch (err) {
-      console.error('Error adding connected wallet:', err)
+      if (error) {
+        // Check if it's a unique constraint violation (wallet already exists)
+        if (error.code === '23505' || error.message?.includes('duplicate')) {
+          console.log('Wallet already exists, updating connection status')
+          // Try to update instead
+          const { error: updateError } = await supabase
+            .from('tracked_wallets')
+            .update({ is_connected: true })
+            .eq('user_id', user.id)
+            .eq('wallet_address', address)
+          
+          if (updateError) {
+            console.error('Error updating existing wallet:', updateError)
+          } else {
+            fetchWallets()
+          }
+          return
+        }
+        throw error
+      }
+
+      if (data) {
+        console.log('✅ Connected wallet added successfully')
+        fetchWallets()
+      }
+    } catch (err: any) {
+      // Only log if it's not a silent/expected error
+      if (err?.code !== '23505' && err?.message !== 'duplicate') {
+        console.error('Error adding connected wallet:', {
+          message: err?.message,
+          code: err?.code,
+          details: err?.details,
+          hint: err?.hint,
+          error: err
+        })
+      }
     }
   }
 

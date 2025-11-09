@@ -166,7 +166,8 @@ export class ProtocolManager {
 // Create singleton instance
 export const protocolManager = new ProtocolManager(
   process.env.NEXT_PUBLIC_SOLANA_RPC_URL ||
-    'https://solana-mainnet.rpc.extrnode.com'
+    process.env.SOLANA_RPC_URL ||
+    'https://api.mainnet-beta.solana.com'
 )
 
 

@@ -1,4 +1,5 @@
 import { Connection, PublicKey, ParsedAccountData } from '@solana/web3.js'
+import { getRpcUrl } from './rpc-config'
 
 export interface TokenPosition {
   mint: string
@@ -17,10 +18,18 @@ export interface ProtocolPosition {
 }
 
 export class PositionTracker {
-  private connection: Connection
+  private connection: Connection | null = null
+  private rpcEndpoint: string
 
   constructor(rpcEndpoint: string) {
-    this.connection = new Connection(rpcEndpoint, 'confirmed')
+    this.rpcEndpoint = rpcEndpoint
+  }
+
+  private getConnection(): Connection {
+    if (!this.connection) {
+      this.connection = new Connection(this.rpcEndpoint, 'confirmed')
+    }
+    return this.connection
   }
 
   /**
@@ -29,7 +38,7 @@ export class PositionTracker {
   async getTokenAccounts(walletAddress: string): Promise<TokenPosition[]> {
     try {
       const publicKey = new PublicKey(walletAddress)
-      const tokenAccounts = await this.connection.getParsedTokenAccountsByOwner(
+      const tokenAccounts = await this.getConnection().getParsedTokenAccountsByOwner(
         publicKey,
         { programId: new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA') }
       )
@@ -55,7 +64,7 @@ export class PositionTracker {
   async getSolBalance(walletAddress: string): Promise<number> {
     try {
       const publicKey = new PublicKey(walletAddress)
-      const balance = await this.connection.getBalance(publicKey)
+      const balance = await this.getConnection().getBalance(publicKey)
       return balance / 1e9 // Convert lamports to SOL
     } catch (error) {
       console.error('Error fetching SOL balance:', error)
@@ -162,8 +171,26 @@ export class PositionTracker {
   }
 }
 
-// Create singleton instance
-export const positionTracker = new PositionTracker(
-  process.env.NEXT_PUBLIC_SOLANA_RPC_URL || 'https://solana-mainnet.rpc.extrnode.com'
-)
+// Create a function that returns a PositionTracker instance with current RPC URL
+// This ensures the RPC URL is read dynamically, not at module load time
+export function getPositionTracker(): PositionTracker {
+  return new PositionTracker(getRpcUrl())
+}
+
+// Export singleton for backward compatibility, but it will use dynamic RPC URL
+// Note: This singleton will use the RPC URL from environment variables
+let _positionTrackerInstance: PositionTracker | null = null
+
+export const positionTracker = new Proxy({} as PositionTracker, {
+  get(target, prop) {
+    if (!_positionTrackerInstance) {
+      _positionTrackerInstance = new PositionTracker(getRpcUrl())
+    }
+    const value = (_positionTrackerInstance as any)[prop]
+    if (typeof value === 'function') {
+      return value.bind(_positionTrackerInstance)
+    }
+    return value
+  }
+})
 

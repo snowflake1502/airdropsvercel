@@ -6,6 +6,7 @@ import { WalletAdapterNetwork } from '@solana/wallet-adapter-base'
 import { WalletModalProvider } from '@solana/wallet-adapter-react-ui'
 import { PhantomWalletAdapter, SolflareWalletAdapter } from '@solana/wallet-adapter-wallets'
 import { clusterApiUrl } from '@solana/web3.js'
+import { getRpcUrl } from '@/lib/env-config'
 
 // Import wallet adapter CSS
 import '@solana/wallet-adapter-react-ui/styles.css'
@@ -20,8 +21,8 @@ export const WalletContextProvider: FC<WalletContextProviderProps> = ({ children
   
   // Use a more reliable public RPC endpoint
   const endpoint = useMemo(() => {
-    // Try to use custom RPC from env, fallback to public endpoints
-    return process.env.NEXT_PUBLIC_SOLANA_RPC_URL || 'https://solana-mainnet.rpc.extrnode.com'
+    // Use the centralized env config helper
+    return getRpcUrl()
   }, [network])
 
   const wallets = useMemo(

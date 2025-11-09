@@ -330,7 +330,8 @@ export class TransactionParser {
 // Create singleton instance
 export const transactionParser = new TransactionParser(
   process.env.NEXT_PUBLIC_SOLANA_RPC_URL ||
-    'https://solana-mainnet.rpc.extrnode.com'
+    process.env.SOLANA_RPC_URL ||
+    'https://api.mainnet-beta.solana.com'
 )
 
 
