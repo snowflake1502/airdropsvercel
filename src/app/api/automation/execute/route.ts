@@ -8,7 +8,7 @@ import { supabase } from '@/lib/supabase'
 import { AutomationLog, AutomationConfig } from '@/lib/automation/types'
 import { TransactionBuilder } from '@/lib/automation/transaction-builder'
 import { Connection, PublicKey, Transaction } from '@solana/web3.js'
-import { getRpcUrl } from '@/lib/env-config'
+import { getServerRpcUrl } from '@/lib/env-config'
 
 export async function POST(request: NextRequest) {
   try {
@@ -131,7 +131,7 @@ async function executeSignedTransaction(
   signedTransactionBase64: string
 ): Promise<NextResponse> {
   try {
-    const connection = new Connection(getRpcUrl(), 'confirmed')
+    const connection = new Connection(getServerRpcUrl(), 'confirmed')
     const signedTransaction = Transaction.from(
       Buffer.from(signedTransactionBase64, 'base64')
     )

@@ -73,53 +73,37 @@ export function getEnvVar(key: string, fallback: string = ''): string {
   return fallback;
 }
 
+/**
+ * Get RPC URL for client-side use
+ * Returns proxy URL to keep API keys secure
+ */
 export function getRpcUrl(): string {
-  // Try multiple ways to get the RPC URL
-  let rpcUrl = getEnvVar('NEXT_PUBLIC_SOLANA_RPC_URL') || 
-               getEnvVar('SOLANA_RPC_URL') || '';
-  
-  // If still not found, try direct process.env access (for server-side)
-  if (!rpcUrl && typeof process !== 'undefined' && process.env) {
-    rpcUrl = process.env.NEXT_PUBLIC_SOLANA_RPC_URL || 
-             process.env.SOLANA_RPC_URL || '';
+  // Client-side: Always use the proxy API route (keeps API keys secure)
+  if (typeof window !== 'undefined') {
+    // Use full URL for same-origin requests (required by ConnectionProvider)
+    return `${window.location.origin}/api/rpc`
   }
   
-  // Client-side: Check window.__NEXT_DATA__ for env vars exposed by Next.js
-  if (!rpcUrl && typeof window !== 'undefined') {
-    const nextData = (window as any).__NEXT_DATA__;
-    if (nextData?.env?.NEXT_PUBLIC_SOLANA_RPC_URL) {
-      rpcUrl = nextData.env.NEXT_PUBLIC_SOLANA_RPC_URL;
-    }
+  // Server-side: Use direct Helius URL (no NEXT_PUBLIC_ prefix, keeps key secure)
+  const heliusRpcUrl = process.env.HELIUS_RPC_URL || 
+                       process.env.SOLANA_RPC_URL ||
+                       'https://api.mainnet-beta.solana.com'
+  
+  return heliusRpcUrl.trim()
+}
+
+/**
+ * Get direct RPC URL (server-side only)
+ * Use this for server-side operations that need direct RPC access
+ */
+export function getServerRpcUrl(): string {
+  if (typeof window !== 'undefined') {
+    throw new Error('getServerRpcUrl() should only be called server-side')
   }
   
-  // Fallback to public RPC if env var not found (rate limited, but safe)
-  // SECURITY: Never hardcode API keys in source code
-  // In Vercel/production, env vars will be set via dashboard
-  if (!rpcUrl || rpcUrl === 'https://api.mainnet-beta.solana.com') {
-    // Use public Solana RPC as fallback (rate limited, but safe)
-    rpcUrl = 'https://api.mainnet-beta.solana.com';
-  }
-  
-  // Debug logging (development only, once per session) - after fallback is set
-  if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
-    // Only log once per session to reduce console noise
-    const logKey = '__rpc_url_logged__';
-    if (!(window as any)[logKey]) {
-      const hasHelius = rpcUrl.includes('helius');
-      const isPublic = rpcUrl === 'https://api.mainnet-beta.solana.com' || !rpcUrl;
-      
-      if (isPublic) {
-        console.warn('⚠️ Using public Solana RPC (rate limited). Helius key not found.');
-        console.warn('   Check: next.config.ts env section and .env.local file');
-      } else if (hasHelius) {
-        console.log('✅ Using Helius RPC');
-      }
-      
-      (window as any)[logKey] = true;
-    }
-  }
-  
-  return rpcUrl.trim();
+  return process.env.HELIUS_RPC_URL || 
+         process.env.SOLANA_RPC_URL ||
+         'https://api.mainnet-beta.solana.com'
 }
 
 
