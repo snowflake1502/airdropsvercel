@@ -94,4 +94,3 @@ export async function GET() {
     rpcProvider: process.env.HELIUS_RPC_URL ? 'Helius' : 'Public Solana RPC',
   })
 }
-
