@@ -384,10 +384,23 @@ export default function ActivitiesPage() {
         body: JSON.stringify({ walletAddress }),
       })
 
-      const syncData = await syncResponse.json()
+      // Check if response is ok and content-type is JSON
+      const contentType = syncResponse.headers.get('content-type')
+      if (!contentType || !contentType.includes('application/json')) {
+        const text = await syncResponse.text()
+        throw new Error(`Invalid response format: ${text.substring(0, 200)}`)
+      }
+
+      let syncData
+      try {
+        syncData = await syncResponse.json()
+      } catch (parseError: any) {
+        const text = await syncResponse.text()
+        throw new Error(`Failed to parse response: ${parseError.message}. Response: ${text.substring(0, 200)}`)
+      }
 
       if (!syncResponse.ok) {
-        throw new Error(syncData.error || 'Failed to sync wallet')
+        throw new Error(syncData.error || `Failed to sync wallet: ${syncResponse.status} ${syncResponse.statusText}`)
       }
 
       // Step 2: Fetch current positions from database
