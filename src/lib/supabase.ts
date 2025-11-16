@@ -1,4 +1,4 @@
-import { createClient } from '@supabase/supabase-js'
+import { createClient, SupabaseClient } from '@supabase/supabase-js'
 
 // SECURITY: Use environment variables (Supabase anon key is safe to expose, but use env vars for flexibility)
 // Note: Supabase anon keys are designed to be public (client-side safe), but we use env vars for best practices
@@ -12,14 +12,31 @@ const isDevelopment = process.env.NODE_ENV !== 'production'
 const finalSupabaseUrl = supabaseUrl || (isDevelopment ? 'https://mcakqykdtxlythsutgpx.supabase.co' : '')
 const finalSupabaseKey = supabaseAnonKey || (isDevelopment ? 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1jYWtxeWtkdHhseXRoc3V0Z3B4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjAyNTMyNTUsImV4cCI6MjA3NTgyOTI1NX0.Nbb4oQKKQaTTe46vjTHPNTxDnqxZL4X5MswbyZD2xjY' : '')
 
-// Only throw error if both env vars AND fallbacks are missing (should never happen in dev)
-if (!finalSupabaseUrl || !finalSupabaseKey) {
+// Create Supabase client with build-time safety
+// During build, if env vars are missing, use placeholder to allow build to succeed
+// At runtime, will use actual env vars from Vercel
+const isBuildTime = typeof window === 'undefined' && 
+  (process.env.NEXT_PHASE === 'phase-production-build' || 
+   process.env.NEXT_PHASE === 'phase-development-build' ||
+   !process.env.VERCEL)
+
+let clientUrl = finalSupabaseUrl
+let clientKey = finalSupabaseKey
+
+// During build time, use placeholder if env vars are missing
+if (isBuildTime && (!clientUrl || !clientKey)) {
+  clientUrl = 'https://placeholder.supabase.co'
+  clientKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBsYWNlaG9sZGVyIiwicm9sZSI6ImFub24iLCJpYXQiOjE2NDUxOTIwMDAsImV4cCI6MTk2MDc2ODAwMH0.placeholder'
+}
+
+// Runtime check - throw error if still missing (shouldn't happen if env vars are set in Vercel)
+if (!isBuildTime && (!finalSupabaseUrl || !finalSupabaseKey)) {
   throw new Error(
-    'Missing Supabase environment variables. Please set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY in your environment variables.'
+    'Missing Supabase environment variables. Please set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY in your Vercel environment variables.'
   )
 }
 
-export const supabase = createClient(finalSupabaseUrl, finalSupabaseKey, {
+export const supabase = createClient(clientUrl, clientKey, {
   auth: {
     autoRefreshToken: true,
     persistSession: true,
