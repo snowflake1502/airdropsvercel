@@ -4,9 +4,15 @@
  * Keeps API keys secure (not exposed to browser)
  * 
  * Compatible with Solana JSON-RPC 2.0 format
+ * 
+ * Route: /api/rpc
  */
 
 import { NextRequest, NextResponse } from 'next/server'
+
+// Ensure this is a server-side route
+export const runtime = 'nodejs'
+export const dynamic = 'force-dynamic'
 
 export async function POST(request: NextRequest) {
   try {
