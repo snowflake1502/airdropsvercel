@@ -81,10 +81,13 @@ export function getRpcUrl(): string {
   // Client-side: Always use the proxy API route (keeps API keys secure)
   if (typeof window !== 'undefined') {
     // Use full URL for same-origin requests (required by ConnectionProvider)
-    return `${window.location.origin}/api/rpc`
+    // This ensures all RPC calls go through our secure proxy
+    const proxyUrl = `${window.location.origin}/api/rpc`
+    return proxyUrl
   }
   
   // Server-side: Use direct Helius URL (no NEXT_PUBLIC_ prefix, keeps key secure)
+  // This is used in API routes and server-side code
   const heliusRpcUrl = process.env.HELIUS_RPC_URL || 
                        process.env.SOLANA_RPC_URL ||
                        'https://api.mainnet-beta.solana.com'
