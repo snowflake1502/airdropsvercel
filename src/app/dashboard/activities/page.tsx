@@ -509,7 +509,19 @@ export default function ActivitiesPage() {
               }
             }
           } else {
-            const errorData = await positionResponse.json().catch(() => ({}))
+            // Try to parse error response, but handle non-JSON gracefully
+            let errorData = {}
+            try {
+              const contentType = positionResponse.headers.get('content-type')
+              if (contentType && contentType.includes('application/json')) {
+                errorData = await positionResponse.json()
+              } else {
+                const text = await positionResponse.text()
+                errorData = { error: text.substring(0, 200) }
+              }
+            } catch (parseError) {
+              errorData = { error: `HTTP ${positionResponse.status}: ${positionResponse.statusText}` }
+            }
             const errorMessage = errorData.error || errorData.message || JSON.stringify(errorData)
             console.warn(`⚠️ Meteora API failed for ${nftAddress}:`, errorMessage)
             
