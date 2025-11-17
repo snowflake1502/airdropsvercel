@@ -10,18 +10,19 @@
 
 // Get RPC URL dynamically to ensure env vars are loaded
 function getRpcUrl(): string {
-  // Get RPC URL from environment variables
-  // Required: NEXT_PUBLIC_SOLANA_RPC_URL must be set in production
-  const url = process.env.NEXT_PUBLIC_SOLANA_RPC_URL || 
-              process.env.SOLANA_RPC_URL;
-  
-  if (!url) {
-    console.error('⚠️ ERROR: NEXT_PUBLIC_SOLANA_RPC_URL not set! Please configure in environment variables.');
-    // Fallback to public RPC (will be rate-limited, but won't crash)
-    return 'https://api.mainnet-beta.solana.com';
+  // Server-side: Use HELIUS_RPC_URL (no NEXT_PUBLIC_ prefix) or fallback to public RPC
+  // This is used in API routes, so we want server-side RPC URL
+  if (typeof window === 'undefined') {
+    // Server-side: Use Helius RPC URL from environment (server-side only)
+    const heliusUrl = process.env.HELIUS_RPC_URL || 
+                     process.env.SOLANA_RPC_URL ||
+                     'https://api.mainnet-beta.solana.com'
+    return heliusUrl
   }
   
-  return url;
+  // Client-side: Should not be called from client (this is for API routes)
+  // But if it is, use proxy
+  return `${window.location.origin}/api/rpc`
 }
 
 // Helper function to introduce a delay
