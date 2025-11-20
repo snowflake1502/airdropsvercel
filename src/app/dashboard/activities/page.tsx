@@ -376,43 +376,77 @@ export default function ActivitiesPage() {
 
       // Step 1: Sync wallet transactions
       console.log('🔄 Starting wallet sync for:', walletAddress)
-      const syncResponse = await fetch('/api/wallet/sync-meteora', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${session.access_token}`,
-        },
-        body: JSON.stringify({ walletAddress }),
-      })
+      console.log('🌐 API endpoint:', '/api/wallet/sync-meteora')
+      console.log('🔑 Has auth token:', !!session.access_token)
+      
+      let syncResponse: Response
+      try {
+        syncResponse = await fetch('/api/wallet/sync-meteora', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${session.access_token}`,
+          },
+          body: JSON.stringify({ walletAddress }),
+        })
+      } catch (fetchError: any) {
+        console.error('❌ Fetch error:', fetchError)
+        throw new Error(`Network error: ${fetchError.message}. Check if the API route is deployed correctly on Vercel.`)
+      }
 
       console.log('📡 Sync response status:', syncResponse.status, syncResponse.statusText)
       const contentType = syncResponse.headers.get('content-type') || ''
       console.log('📡 Content-Type:', contentType)
+      console.log('📡 Response URL:', syncResponse.url)
+      console.log('📡 Response redirected:', syncResponse.redirected)
+      console.log('📡 Response type:', syncResponse.type)
 
       // Read response as text first (can only read body once)
-      const responseText = await syncResponse.text()
-      console.log('📡 Response text (first 500 chars):', responseText.substring(0, 500))
+      let responseText: string
+      try {
+        responseText = await syncResponse.text()
+        console.log('📡 Response text length:', responseText.length)
+        console.log('📡 Response text (first 500 chars):', responseText.substring(0, 500))
+        console.log('📡 Response text (last 200 chars):', responseText.substring(Math.max(0, responseText.length - 200)))
+      } catch (textError: any) {
+        console.error('❌ Error reading response text:', textError)
+        throw new Error(`Failed to read server response: ${textError.message}`)
+      }
 
       // Check if response is JSON
       if (!contentType.includes('application/json')) {
         console.error('❌ Non-JSON response received')
-        throw new Error(`Server returned non-JSON response (${contentType}). Check if environment variables are set in Vercel. Response: ${responseText.substring(0, 200)}`)
+        console.error('❌ Full response:', responseText)
+        // Check if it's an HTML error page
+        if (responseText.trim().startsWith('<!DOCTYPE') || responseText.trim().startsWith('<html')) {
+          throw new Error(`Server returned HTML error page (likely 404 or 500). Check Vercel deployment logs. Status: ${syncResponse.status}. Response preview: ${responseText.substring(0, 300)}`)
+        }
+        throw new Error(`Server returned non-JSON response (${contentType}). Status: ${syncResponse.status}. Response: ${responseText.substring(0, 300)}`)
       }
 
       // Parse JSON
-      let syncData
+      let syncData: any
       try {
         if (!responseText || responseText.trim().length === 0) {
           throw new Error('Empty response from server')
         }
         syncData = JSON.parse(responseText)
+        console.log('✅ Successfully parsed JSON response')
       } catch (parseError: any) {
         console.error('❌ JSON parse error:', parseError.message)
-        console.error('❌ Full response:', responseText)
-        throw new Error(`Failed to parse server response: ${parseError.message}. Response: ${responseText.substring(0, 300)}`)
+        console.error('❌ Parse error stack:', parseError.stack)
+        console.error('❌ Full response text:', responseText)
+        console.error('❌ Response starts with:', responseText.substring(0, 50))
+        // Check if it's HTML
+        if (responseText.trim().startsWith('<!DOCTYPE') || responseText.trim().startsWith('<html')) {
+          throw new Error(`Server returned HTML instead of JSON (likely error page). Status: ${syncResponse.status}. This usually means the API route isn't deployed or there's a server error. Check Vercel logs.`)
+        }
+        throw new Error(`Failed to parse server response as JSON: ${parseError.message}. Status: ${syncResponse.status}. Response preview: ${responseText.substring(0, 300)}`)
       }
 
       if (!syncResponse.ok) {
+        console.error('❌ Response not OK:', syncResponse.status)
+        console.error('❌ Response data:', syncData)
         throw new Error(syncData.error || syncData.details || `Failed to sync wallet: ${syncResponse.status} ${syncResponse.statusText}`)
       }
 
