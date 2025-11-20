@@ -375,6 +375,7 @@ export default function ActivitiesPage() {
       }
 
       // Step 1: Sync wallet transactions
+      console.log('🔄 Starting wallet sync for:', walletAddress)
       const syncResponse = await fetch('/api/wallet/sync-meteora', {
         method: 'POST',
         headers: {
@@ -384,23 +385,35 @@ export default function ActivitiesPage() {
         body: JSON.stringify({ walletAddress }),
       })
 
-      // Check if response is ok and content-type is JSON
-      const contentType = syncResponse.headers.get('content-type')
-      if (!contentType || !contentType.includes('application/json')) {
-        const text = await syncResponse.text()
-        throw new Error(`Invalid response format: ${text.substring(0, 200)}`)
+      console.log('📡 Sync response status:', syncResponse.status, syncResponse.statusText)
+      const contentType = syncResponse.headers.get('content-type') || ''
+      console.log('📡 Content-Type:', contentType)
+
+      // Read response as text first (can only read body once)
+      const responseText = await syncResponse.text()
+      console.log('📡 Response text (first 500 chars):', responseText.substring(0, 500))
+
+      // Check if response is JSON
+      if (!contentType.includes('application/json')) {
+        console.error('❌ Non-JSON response received')
+        throw new Error(`Server returned non-JSON response (${contentType}). Check if environment variables are set in Vercel. Response: ${responseText.substring(0, 200)}`)
       }
 
+      // Parse JSON
       let syncData
       try {
-        syncData = await syncResponse.json()
+        if (!responseText || responseText.trim().length === 0) {
+          throw new Error('Empty response from server')
+        }
+        syncData = JSON.parse(responseText)
       } catch (parseError: any) {
-        const text = await syncResponse.text()
-        throw new Error(`Failed to parse response: ${parseError.message}. Response: ${text.substring(0, 200)}`)
+        console.error('❌ JSON parse error:', parseError.message)
+        console.error('❌ Full response:', responseText)
+        throw new Error(`Failed to parse server response: ${parseError.message}. Response: ${responseText.substring(0, 300)}`)
       }
 
       if (!syncResponse.ok) {
-        throw new Error(syncData.error || `Failed to sync wallet: ${syncResponse.status} ${syncResponse.statusText}`)
+        throw new Error(syncData.error || syncData.details || `Failed to sync wallet: ${syncResponse.status} ${syncResponse.statusText}`)
       }
 
       // Step 2: Fetch current positions from database
@@ -522,7 +535,7 @@ export default function ActivitiesPage() {
             } catch (parseError) {
               errorData = { error: `HTTP ${positionResponse.status}: ${positionResponse.statusText}` }
             }
-            const errorMessage = errorData.error || errorData.message || JSON.stringify(errorData)
+            const errorMessage = (errorData as any).error || (errorData as any).message || JSON.stringify(errorData)
             console.warn(`⚠️ Meteora API failed for ${nftAddress}:`, errorMessage)
             
             // If API returns 404/not found and DB says closed, skip it

@@ -25,7 +25,17 @@ export const dynamic = 'force-dynamic';
 
 export async function POST(request: NextRequest) {
   try {
-    const { walletAddress } = await request.json();
+    // Ensure we always return JSON, even if request parsing fails
+    let walletAddress: string;
+    try {
+      const body = await request.json();
+      walletAddress = body.walletAddress;
+    } catch (parseError: any) {
+      return NextResponse.json(
+        { error: 'Invalid request body', details: parseError.message },
+        { status: 400 }
+      );
+    }
 
     if (!walletAddress) {
       return NextResponse.json(
