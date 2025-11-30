@@ -726,13 +726,47 @@ export default function PositionsPage() {
           console.log(`  Total Fees: $${totalFeesClaimedUSD.toFixed(2)}`)
           console.log(`  Total Withdrawn: $${totalWithdrawnUSD.toFixed(2)}`)
           
-          // Current position value from manual_positions
-          const activePosition = manualPositions.find(p => p.is_active && p.protocols?.name === 'Meteora')
-          const currentPositionValueUSD = activePosition ? parseFloat(activePosition.position_data?.total_usd || '0') : 0
+          // Current position value - check both manual_positions and transaction history
+          let currentPositionValueUSD = 0
+          
+          // First, try to get from manual_positions
+          const activeManualPosition = manualPositions.find(p => p.is_active && p.protocols?.name === 'Meteora')
+          if (activeManualPosition) {
+            currentPositionValueUSD = parseFloat(activeManualPosition.position_data?.total_usd || '0')
+            console.log(`  Current Position Value (from manual): $${currentPositionValueUSD.toFixed(2)}`)
+          } else {
+            // If not in manual_positions, check transaction history for active positions
+            // An active position is one that was opened but never closed
+            const openedPositions = new Set(positionOpens.map(tx => tx.position_nft_address).filter(Boolean))
+            const closedPositions = new Set(positionCloses.map(tx => tx.position_nft_address).filter(Boolean))
+            const activePositionAddresses = Array.from(openedPositions).filter(addr => !closedPositions.has(addr))
+            
+            if (activePositionAddresses.length > 0) {
+              // For active positions, estimate current value from the last open transaction
+              // In a real scenario, we'd fetch from Meteora API, but for now use the open transaction value
+              activePositionAddresses.forEach(posAddr => {
+                const lastOpenTx = positionOpens
+                  .filter(tx => tx.position_nft_address === posAddr)
+                  .sort((a, b) => b.block_time - a.block_time)[0]
+                if (lastOpenTx) {
+                  // Use initial investment value as current value estimate
+                  // Note: In production, this should be fetched from Meteora API for accurate current value
+                  // For now, using initial investment prevents showing -100% loss
+                  const openValue = parseFloat(lastOpenTx.total_usd || '0')
+                  currentPositionValueUSD += openValue
+                }
+              })
+              console.log(`  Current Position Value (from transactions): $${currentPositionValueUSD.toFixed(2)}`)
+              console.log(`  Active Positions: ${activePositionAddresses.length}`)
+            }
+          }
           
           // P&L in USD = (Current Value + Total Withdrawn + Total Fees) - Total Invested
           const profitLossUSD = (currentPositionValueUSD + totalWithdrawnUSD + totalFeesClaimedUSD) - totalInvestedUSD
           const profitLossPercent = totalInvestedUSD > 0 ? (profitLossUSD / totalInvestedUSD) * 100 : 0
+          
+          console.log(`  Current Position Value: $${currentPositionValueUSD.toFixed(2)}`)
+          console.log(`  P&L: $${profitLossUSD.toFixed(2)} (${profitLossPercent.toFixed(2)}%)`)
           
           // Group transactions by position for detailed breakdown
           const positionGroups = new Map()
@@ -756,9 +790,25 @@ export default function PositionsPage() {
             const fees = feeTxs.reduce((sum: number, tx: any) => sum + Math.abs(parseFloat(tx.total_usd) || 0), 0)
             
             const isActive = !closeTx
-            const currentValue = isActive && activePosition?.position_data?.position_address === posAddr 
-              ? parseFloat(activePosition.position_data?.total_usd || '0') 
-              : 0
+            // Get current value: first try manual_positions, then estimate from transactions
+            let currentValue = 0
+            if (isActive) {
+              // Check manual_positions first
+              const manualPos = manualPositions.find(p => 
+                p.is_active && 
+                p.protocols?.name === 'Meteora' &&
+                p.position_data?.position_address === posAddr
+              )
+              if (manualPos) {
+                currentValue = parseFloat(manualPos.position_data?.total_usd || '0')
+              } else if (openTx) {
+                // Estimate: initial investment + fees earned (simplified - real value would come from API)
+                const openValue = parseFloat(openTx.total_usd || '0')
+                const positionFees = feeTxs.reduce((sum: number, tx: any) => sum + parseFloat(tx.total_usd || '0'), 0)
+                // For now, use initial value (in production, fetch real-time value from Meteora API)
+                currentValue = openValue
+              }
+            }
             
             const pnl = (currentValue + withdrawn + fees) - invested
             const pnlPercent = invested > 0 ? (pnl / invested) * 100 : 0
