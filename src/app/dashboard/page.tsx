@@ -553,8 +553,31 @@ export default function DashboardPage() {
                   {publicKey.toBase58().slice(0, 8)}...{publicKey.toBase58().slice(-6)}
                 </p>
               </div>
-              <div className="w-16 h-16 bg-white bg-opacity-20 rounded-full flex items-center justify-center">
-                <span className="text-2xl">💰</span>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => checkWalletBalance(publicKey.toBase58())}
+                  disabled={loadingBalance}
+                  className="px-3 py-1.5 bg-white bg-opacity-20 hover:bg-opacity-30 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                  title="Refresh balance"
+                >
+                  <svg
+                    className={`w-4 h-4 ${loadingBalance ? 'animate-spin' : ''}`}
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                    />
+                  </svg>
+                  {loadingBalance ? 'Refreshing...' : 'Refresh'}
+                </button>
+                <div className="w-16 h-16 bg-white bg-opacity-20 rounded-full flex items-center justify-center">
+                  <span className="text-2xl">💰</span>
+                </div>
               </div>
             </div>
             

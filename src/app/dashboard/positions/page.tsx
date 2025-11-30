@@ -9,6 +9,11 @@ import WalletManager from '@/components/WalletManager'
 import PositionTracker from '@/components/PositionTracker'
 import { protocolManager, Position } from '@/lib/protocols'
 import { positionTracker } from '@/lib/positionTracker'
+import { PublicKey, ParsedAccountData } from '@solana/web3.js'
+import { useConnection } from '@solana/wallet-adapter-react'
+
+// USDC mint address on Solana mainnet
+const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'
 
 export default function PositionsPage() {
   const [user, setUser] = useState<User | null>(null)
@@ -16,6 +21,7 @@ export default function PositionsPage() {
   const [loadingPositions, setLoadingPositions] = useState(false)
   const [selectedWallet, setSelectedWallet] = useState<string>('')
   const [solBalance, setSolBalance] = useState(0)
+  const [usdcBalance, setUsdcBalance] = useState(0)
   const [positions, setPositions] = useState<Position[]>([])
   const [farmingScore, setFarmingScore] = useState(0)
   const [manualPositions, setManualPositions] = useState<any[]>([])
@@ -27,6 +33,7 @@ export default function PositionsPage() {
   const [transactionHistory, setTransactionHistory] = useState<any[]>([])
   const [expandedPosition, setExpandedPosition] = useState<string | null>(null)
   const router = useRouter()
+  const { connection } = useConnection()
 
   useEffect(() => {
     const checkUser = async () => {
@@ -314,6 +321,34 @@ export default function PositionsPage() {
         await loadManualPositions(user.id) // Refresh positions with updated data
       }
 
+      // Refresh balances after sync completes
+      if (selectedWallet && connection) {
+        try {
+          const publicKey = new PublicKey(selectedWallet)
+          const balance = await connection.getBalance(publicKey)
+          setSolBalance(balance / 1e9)
+          
+          const tokenAccounts = await connection.getParsedTokenAccountsByOwner(
+            publicKey,
+            { programId: new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA') }
+          )
+          
+          const usdcAccount = tokenAccounts.value.find(account => {
+            const parsedInfo = (account.account.data as ParsedAccountData).parsed.info
+            return parsedInfo.mint === USDC_MINT
+          })
+          
+          if (usdcAccount) {
+            const parsedInfo = (usdcAccount.account.data as ParsedAccountData).parsed.info
+            setUsdcBalance(parsedInfo.tokenAmount.uiAmount || 0)
+          } else {
+            setUsdcBalance(0)
+          }
+        } catch (error) {
+          console.error('Error refreshing balances after sync:', error)
+        }
+      }
+
       // Show success message
       alert(
         `✅ Wallet Sync Complete!\n\n` +
@@ -469,6 +504,34 @@ export default function PositionsPage() {
         await loadManualPositions(user.id)
       }
 
+      // Refresh balances after sync completes
+      if (selectedWallet && connection) {
+        try {
+          const publicKey = new PublicKey(selectedWallet)
+          const balance = await connection.getBalance(publicKey)
+          setSolBalance(balance / 1e9)
+          
+          const tokenAccounts = await connection.getParsedTokenAccountsByOwner(
+            publicKey,
+            { programId: new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA') }
+          )
+          
+          const usdcAccount = tokenAccounts.value.find(account => {
+            const parsedInfo = (account.account.data as ParsedAccountData).parsed.info
+            return parsedInfo.mint === USDC_MINT
+          })
+          
+          if (usdcAccount) {
+            const parsedInfo = (usdcAccount.account.data as ParsedAccountData).parsed.info
+            setUsdcBalance(parsedInfo.tokenAmount.uiAmount || 0)
+          } else {
+            setUsdcBalance(0)
+          }
+        } catch (error) {
+          console.error('Error refreshing balances after sync:', error)
+        }
+      }
+
       // Show success message
       alert(
         `✅ Clear & Re-sync Complete!\n\n` +
@@ -528,11 +591,12 @@ export default function PositionsPage() {
     }
   }
 
-  // Fetch positions when wallet is selected
+  // Fetch positions and balances when wallet is selected
   useEffect(() => {
     const fetchPositions = async () => {
-      if (!selectedWallet) {
+      if (!selectedWallet || !connection) {
         setSolBalance(0)
+        setUsdcBalance(0)
         setPositions([])
         setFarmingScore(0)
         return
@@ -540,9 +604,35 @@ export default function PositionsPage() {
 
       setLoadingPositions(true)
       try {
+        const publicKey = new PublicKey(selectedWallet)
+        
         // Fetch SOL balance
         const balance = await positionTracker.getSolBalance(selectedWallet)
         setSolBalance(balance)
+
+        // Fetch USDC balance
+        try {
+          const tokenAccounts = await connection.getParsedTokenAccountsByOwner(
+            publicKey,
+            { programId: new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA') }
+          )
+          
+          const usdcAccount = tokenAccounts.value.find(account => {
+            const parsedInfo = (account.account.data as ParsedAccountData).parsed.info
+            return parsedInfo.mint === USDC_MINT
+          })
+          
+          if (usdcAccount) {
+            const parsedInfo = (usdcAccount.account.data as ParsedAccountData).parsed.info
+            const usdcAmount = parsedInfo.tokenAmount.uiAmount || 0
+            setUsdcBalance(usdcAmount)
+          } else {
+            setUsdcBalance(0)
+          }
+        } catch (error) {
+          console.error('Error fetching USDC balance:', error)
+          setUsdcBalance(0)
+        }
 
         // Fetch positions from all protocols
         const allPositions = await protocolManager.getAllPositions(selectedWallet)
@@ -559,7 +649,7 @@ export default function PositionsPage() {
     }
 
     fetchPositions()
-  }, [selectedWallet])
+  }, [selectedWallet, connection])
 
   if (loading) {
     return (
@@ -1760,7 +1850,25 @@ export default function PositionsPage() {
               <div className="text-3xl font-bold text-purple-600 mt-2">
                 {loadingPositions ? '...' : solBalance.toFixed(4)}
               </div>
-              <div className="text-xs text-gray-500 mt-1">SOL</div>
+              <div className="text-xs text-gray-500 mt-1">
+                ≈ ${(solBalance * 190).toFixed(2)}
+              </div>
+            </div>
+            <div className="bg-white rounded-lg shadow p-6">
+              <div className="text-sm text-gray-600">USDC Balance</div>
+              <div className="text-3xl font-bold text-green-600 mt-2">
+                {loadingPositions ? '...' : usdcBalance.toFixed(2)}
+              </div>
+              <div className="text-xs text-gray-500 mt-1">
+                ${usdcBalance.toFixed(2)} USD
+              </div>
+            </div>
+            <div className="bg-white rounded-lg shadow p-6">
+              <div className="text-sm text-gray-600">Total Balance</div>
+              <div className="text-3xl font-bold text-indigo-600 mt-2">
+                {loadingPositions ? '...' : `$${((solBalance * 190) + usdcBalance).toFixed(2)}`}
+              </div>
+              <div className="text-xs text-gray-500 mt-1">USD Value</div>
             </div>
             <div className="bg-white rounded-lg shadow p-6">
               <div className="text-sm text-gray-600">Protocol Positions</div>
@@ -1768,22 +1876,6 @@ export default function PositionsPage() {
                 {loadingPositions ? '...' : positions.length}
               </div>
               <div className="text-xs text-gray-500 mt-1">Active positions</div>
-            </div>
-            <div className="bg-white rounded-lg shadow p-6">
-              <div className="text-sm text-gray-600">Protocols Active</div>
-              <div className="text-3xl font-bold text-blue-600 mt-2">
-                {loadingPositions
-                  ? '...'
-                  : new Set(positions.map((p) => p.protocol)).size}
-              </div>
-              <div className="text-xs text-gray-500 mt-1">Different protocols</div>
-            </div>
-            <div className="bg-white rounded-lg shadow p-6">
-              <div className="text-sm text-gray-600">Farming Score</div>
-              <div className="text-3xl font-bold text-indigo-600 mt-2">
-                {loadingPositions ? '...' : farmingScore}
-              </div>
-              <div className="text-xs text-gray-500 mt-1">Out of 100</div>
             </div>
           </div>
         )}
