@@ -27,9 +27,9 @@ export async function POST(request: NextRequest) {
   try {
     // Ensure we always return JSON, even if request parsing fails
     let walletAddress: string;
-    let txLimit: number = 50; // Default to 50 transactions (25 seconds with 500ms delay)
-    // Note: 50 transactions may timeout on Vercel free tier (10s limit). 
-    // Consider upgrading to Pro (60s limit) or reducing limit if needed.
+    let txLimit: number = 30; // Default to 30 transactions (9 seconds with 300ms delay - safe for free tier)
+    // Note: 30 transactions × 300ms = 9 seconds (works on Vercel free tier 10s limit)
+    // For Pro tier users, can increase limit up to 100 via request body
     try {
       const body = await request.json();
       walletAddress = body.walletAddress;
@@ -115,15 +115,19 @@ export async function POST(request: NextRequest) {
     }
 
     // Step 2: Fetch full transaction details in batches
-    // Process transactions (default: 50, configurable up to 100)
-    // 50 transactions × 500ms = 25 seconds (requires Vercel Pro tier - 60s limit)
-    // For free tier (10s limit), use limit: 15 in request body
+    // Process transactions (default: 30, configurable up to 100)
+    // 30 transactions × 300ms = 9 seconds (safe for Vercel free tier - 10s limit)
+    // For Pro tier (60s limit), can increase limit up to 100 via request body
     const actualLimit = Math.min(txLimit, signatures.length);
     const signaturestoFetch = signatures.slice(0, actualLimit).map((s) => s.signature);
 
+    // Use 300ms delay (3 req/sec) - safe for Helius free tier and faster than 500ms
+    const delayMs = 300;
+    const estimatedTime = (signaturestoFetch.length * delayMs) / 1000;
+    
     console.log(`Fetching details for ${signaturestoFetch.length} transactions (limit: ${txLimit})...`);
-    console.log(`⏱️  Using 500ms delay between requests (estimated time: ${(signaturestoFetch.length * 500) / 1000}s)...`);
-    const transactions = await getTransactionsBatch(signaturestoFetch, 500); // 500ms = 2 req/sec (safe for Helius free tier)
+    console.log(`⏱️  Using ${delayMs}ms delay between requests (estimated time: ${estimatedTime}s)...`);
+    const transactions = await getTransactionsBatch(signaturestoFetch, delayMs);
 
     // Step 3: Filter for Meteora transactions
     const meteoraTransactions = transactions.filter((tx) =>
