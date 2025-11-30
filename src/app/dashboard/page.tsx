@@ -60,6 +60,7 @@ export default function DashboardPage() {
   const [planStatus, setPlanStatus] = useState<'pending' | 'approved' | 'active'>('pending')
   const [savingPlan, setSavingPlan] = useState(false)
   const [showChangePlan, setShowChangePlan] = useState(false)
+  const [solPriceUSD, setSolPriceUSD] = useState<number>(190) // SOL price in USD, default fallback
   const router = useRouter()
   const { publicKey, connected } = useWallet()
   const { connection } = useConnection()
@@ -79,7 +80,27 @@ export default function DashboardPage() {
       loadBestOpportunities()
     }
     checkUser()
+    
+    // Fetch SOL price on component mount
+    fetchSolPrice()
   }, [router])
+
+  // Fetch SOL price from CoinGecko API
+  const fetchSolPrice = async () => {
+    try {
+      const response = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd')
+      if (response.ok) {
+        const data = await response.json()
+        if (data.solana?.usd) {
+          setSolPriceUSD(data.solana.usd)
+          console.log(`✅ SOL price fetched: $${data.solana.usd.toFixed(2)}`)
+        }
+      }
+    } catch (error) {
+      console.warn('⚠️ Failed to fetch SOL price, using fallback $190:', error)
+      // Keep default fallback value
+    }
+  }
 
   // Check wallet balance when connected
   useEffect(() => {
@@ -343,8 +364,7 @@ export default function DashboardPage() {
   }
 
   const generatePersonalizedPlan = (balanceSOL: number, balanceUSDC: number) => {
-    // Estimate SOL price (can be fetched from API later)
-    const solPriceUSD = 190
+    // Use current SOL price from state
     const solUSD = balanceSOL * solPriceUSD
     const usdcUSD = balanceUSDC // USDC is already in USD
     const balanceUSD = solUSD + usdcUSD
@@ -555,10 +575,13 @@ export default function DashboardPage() {
               </div>
               <div className="flex items-center gap-3">
                 <button
-                  onClick={() => checkWalletBalance(publicKey.toBase58())}
+                  onClick={() => {
+                    checkWalletBalance(publicKey.toBase58())
+                    fetchSolPrice()
+                  }}
                   disabled={loadingBalance}
                   className="px-3 py-1.5 bg-white bg-opacity-20 hover:bg-opacity-30 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-                  title="Refresh balance"
+                  title="Refresh balance and SOL price"
                 >
                   <svg
                     className={`w-4 h-4 ${loadingBalance ? 'animate-spin' : ''}`}
@@ -597,7 +620,7 @@ export default function DashboardPage() {
                         {walletBalance.toFixed(4)}
                       </p>
                       <p className="text-xs text-gray-700">
-                        ≈ ${(walletBalance * 190).toFixed(2)}
+                        ≈ ${(walletBalance * solPriceUSD).toFixed(2)}
                       </p>
                     </div>
                   </div>
@@ -627,10 +650,10 @@ export default function DashboardPage() {
                     <span className="text-sm font-semibold text-gray-900">Total Balance</span>
                     <div className="text-right">
                       <p className="text-2xl font-bold text-gray-900">
-                        ${((walletBalance * 190) + usdcBalance).toFixed(2)}
+                        ${((walletBalance * solPriceUSD) + usdcBalance).toFixed(2)}
                       </p>
                       <p className="text-xs text-gray-700">
-                        {(walletBalance * 190 + usdcBalance).toFixed(2)} USD
+                        {(walletBalance * solPriceUSD + usdcBalance).toFixed(2)} USD
                       </p>
                     </div>
                   </div>
@@ -926,7 +949,7 @@ export default function DashboardPage() {
                   </span>
                 </div>
                 <div className="flex justify-between items-center text-xs text-gray-500">
-                  <span>SOL: {walletBalance.toFixed(4)} ≈ ${(walletBalance * 190).toFixed(2)}</span>
+                  <span>SOL: {walletBalance.toFixed(4)} ≈ ${(walletBalance * solPriceUSD).toFixed(2)}</span>
                   <span>USDC: {usdcBalance.toFixed(2)}</span>
                 </div>
               </div>
