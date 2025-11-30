@@ -8,11 +8,13 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Wallet address required' }, { status: 400 });
   }
   
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  // Use fallback values if env vars not set (same as other API routes)
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://mcakqykdtxlythsutgpx.supabase.co';
+  const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1jYWtxeWtkdHhseXRoc3V0Z3B4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjAyNTMyNTUsImV4cCI6MjA3NTgyOTI1NX0.Nbb4oQKKQaTTe46vjTHPNTxDnqxZL4X5MswbyZD2xjY';
   
-  if (!supabaseUrl || !supabaseKey) {
-    return NextResponse.json({ error: 'Server configuration error' }, { status: 500 });
+  // Log warning if using fallback values
+  if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
+    console.warn('⚠️ Using fallback Supabase credentials in debug API route.');
   }
   
   const supabase = createClient(supabaseUrl, supabaseKey);
