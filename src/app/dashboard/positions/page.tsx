@@ -836,8 +836,7 @@ export default function PositionsPage() {
           }).sort((a, b) => (b.openDate?.getTime() || 0) - (a.openDate?.getTime() || 0))
           
           // Check position status - use manual_positions or transaction history
-          // Ensure manualPositions is an array and has proper structure
-          const safeManualPositions = Array.isArray(manualPositions) ? manualPositions : []
+          // Reuse safeManualPositions already defined above
           const activeManualPos = safeManualPositions.find(p => 
             p && p.is_active && p.protocols && p.protocols.name === 'Meteora'
           )
