@@ -685,9 +685,9 @@ export default function PositionsPage() {
         </div>
 
         {/* Airdrop Farming Analytics */}
-        {transactionHistory.length > 0 && (() => {
+        {Array.isArray(transactionHistory) && transactionHistory.length > 0 && (() => {
           // Calculate farming analytics
-          const sortedTxs = [...transactionHistory].sort((a, b) => a.block_time - b.block_time)
+          const sortedTxs = [...transactionHistory].sort((a, b) => (a?.block_time || 0) - (b?.block_time || 0))
           const firstTx = sortedTxs[0]
           const farmingStartDate = new Date(firstTx.block_time * 1000)
           const daysFarming = Math.floor((Date.now() - farmingStartDate.getTime()) / (1000 * 60 * 60 * 24))
@@ -729,8 +729,13 @@ export default function PositionsPage() {
           // Current position value - check both manual_positions and transaction history
           let currentPositionValueUSD = 0
           
+          // Ensure manualPositions is an array
+          const safeManualPositions = Array.isArray(manualPositions) ? manualPositions : []
+          
           // First, try to get from manual_positions
-          const activeManualPosition = manualPositions.find(p => p.is_active && p.protocols?.name === 'Meteora')
+          const activeManualPosition = safeManualPositions.find(p => 
+            p && p.is_active && p.protocols && p.protocols.name === 'Meteora'
+          )
           if (activeManualPosition) {
             currentPositionValueUSD = parseFloat(activeManualPosition.position_data?.total_usd || '0')
             console.log(`  Current Position Value (from manual): $${currentPositionValueUSD.toFixed(2)}`)
@@ -794,10 +799,11 @@ export default function PositionsPage() {
             let currentValue = 0
             if (isActive) {
               // Check manual_positions first
-              const manualPos = manualPositions.find(p => 
-                p.is_active && 
-                p.protocols?.name === 'Meteora' &&
-                p.position_data?.position_address === posAddr
+              const safeManualPositions = Array.isArray(manualPositions) ? manualPositions : []
+              const manualPos = safeManualPositions.find(p => 
+                p && p.is_active && 
+                p.protocols && p.protocols.name === 'Meteora' &&
+                p.position_data && p.position_data.position_address === posAddr
               )
               if (manualPos) {
                 currentValue = parseFloat(manualPos.position_data?.total_usd || '0')
@@ -830,14 +836,18 @@ export default function PositionsPage() {
           }).sort((a, b) => (b.openDate?.getTime() || 0) - (a.openDate?.getTime() || 0))
           
           // Check position status - use manual_positions or transaction history
-          const activeManualPos = manualPositions.find(p => p.is_active && p.protocols?.name === 'Meteora')
-          const hasActivePositionFromTx = positionPnLs.some(pos => pos.isActive)
+          // Ensure manualPositions is an array and has proper structure
+          const safeManualPositions = Array.isArray(manualPositions) ? manualPositions : []
+          const activeManualPos = safeManualPositions.find(p => 
+            p && p.is_active && p.protocols && p.protocols.name === 'Meteora'
+          )
+          const hasActivePositionFromTx = Array.isArray(positionPnLs) && positionPnLs.some(pos => pos && pos.isActive)
           const hasActivePosition = !!activeManualPos || hasActivePositionFromTx
           
           // Check if position is out of range (from manual_positions if available)
-          const isOutOfRange = activeManualPos 
-            ? (activeManualPos.position_data?.status === 'out_of_range' || 
-               activeManualPos.position_data?.fee_apr_24h === '0.00%')
+          const isOutOfRange = activeManualPos && activeManualPos.position_data
+            ? (activeManualPos.position_data.status === 'out_of_range' || 
+               activeManualPos.position_data.fee_apr_24h === '0.00%')
             : false // Can't determine from transaction history alone
           
           // Generate recommendations
