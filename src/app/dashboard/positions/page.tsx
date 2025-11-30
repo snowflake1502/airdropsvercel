@@ -829,10 +829,16 @@ export default function PositionsPage() {
             }
           }).sort((a, b) => (b.openDate?.getTime() || 0) - (a.openDate?.getTime() || 0))
           
-          // Check position status
-          const isOutOfRange = activePosition?.position_data?.status === 'out_of_range' || 
-                              (activePosition?.position_data?.fee_apr_24h === '0.00%')
-          const hasActivePosition = !!activePosition
+          // Check position status - use manual_positions or transaction history
+          const activeManualPos = manualPositions.find(p => p.is_active && p.protocols?.name === 'Meteora')
+          const hasActivePositionFromTx = positionPnLs.some(pos => pos.isActive)
+          const hasActivePosition = !!activeManualPos || hasActivePositionFromTx
+          
+          // Check if position is out of range (from manual_positions if available)
+          const isOutOfRange = activeManualPos 
+            ? (activeManualPos.position_data?.status === 'out_of_range' || 
+               activeManualPos.position_data?.fee_apr_24h === '0.00%')
+            : false // Can't determine from transaction history alone
           
           // Generate recommendations
           const recommendations = []
