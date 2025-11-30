@@ -271,10 +271,39 @@ export default function PositionsPage() {
         body: JSON.stringify({ walletAddress: walletSyncAddress }),
       })
 
-      const data = await response.json()
+      // Read response as text first to handle non-JSON responses
+      const responseText = await response.text()
+      const contentType = response.headers.get('content-type') || ''
+
+      // Parse JSON response with proper error handling
+      let data: any
+      try {
+        if (!responseText || responseText.trim().length === 0) {
+          throw new Error('Empty response from server')
+        }
+        
+        // Check content type
+        if (!contentType.includes('application/json')) {
+          // Check if it's HTML error page
+          if (responseText.trim().startsWith('<!DOCTYPE') || responseText.trim().startsWith('<html')) {
+            throw new Error(`Server returned HTML instead of JSON (likely error page). Status: ${response.status}. This usually means the API route timed out or there's a server error. Check Vercel logs.`)
+          }
+          throw new Error(`Server returned non-JSON response (${contentType}). Status: ${response.status}. Response preview: ${responseText.substring(0, 300)}`)
+        }
+
+        data = JSON.parse(responseText)
+      } catch (parseError: any) {
+        console.error('❌ JSON parse error:', parseError.message)
+        console.error('❌ Response text (first 500 chars):', responseText.substring(0, 500))
+        // Check if it's HTML
+        if (responseText.trim().startsWith('<!DOCTYPE') || responseText.trim().startsWith('<html')) {
+          throw new Error(`Server returned HTML instead of JSON (likely error page). Status: ${response.status}. This usually means the API route timed out or there's a server error. Check Vercel logs.`)
+        }
+        throw new Error(`Failed to parse server response as JSON: ${parseError.message}. Status: ${response.status}. Response preview: ${responseText.substring(0, 300)}`)
+      }
 
       if (!response.ok) {
-        throw new Error(data.details || data.error || 'Failed to sync wallet')
+        throw new Error(data.details || data.error || `Failed to sync wallet: ${response.status} ${response.statusText}`)
       }
 
       setWalletSyncResult(data)
@@ -342,9 +371,46 @@ export default function PositionsPage() {
         body: JSON.stringify({ walletAddress: walletSyncAddress }),
       })
 
+      // Read response as text first to handle non-JSON responses
+      const clearResponseText = await clearResponse.text()
+      const clearContentType = clearResponse.headers.get('content-type') || ''
+
       if (!clearResponse.ok) {
-        const clearData = await clearResponse.json()
+        // Try to parse error response
+        let clearData: any
+        try {
+          if (clearResponseText && clearContentType.includes('application/json')) {
+            clearData = JSON.parse(clearResponseText)
+          } else {
+            // Non-JSON error response
+            if (clearResponseText.trim().startsWith('<!DOCTYPE') || clearResponseText.trim().startsWith('<html')) {
+              throw new Error(`Server returned HTML error page. Status: ${clearResponse.status}. Check Vercel logs.`)
+            }
+            throw new Error(`Server error: ${clearResponse.status} ${clearResponse.statusText}. Response: ${clearResponseText.substring(0, 200)}`)
+          }
+        } catch (parseError: any) {
+          throw new Error(`Failed to clear transactions: ${clearResponse.status} ${clearResponse.statusText}. ${parseError.message}`)
+        }
         throw new Error(clearData.details || clearData.error || 'Failed to clear transactions')
+      }
+
+      // Parse success response
+      let clearData: any
+      try {
+        if (!clearResponseText || clearResponseText.trim().length === 0) {
+          throw new Error('Empty response from server')
+        }
+        if (!clearContentType.includes('application/json')) {
+          if (clearResponseText.trim().startsWith('<!DOCTYPE') || clearResponseText.trim().startsWith('<html')) {
+            throw new Error('Server returned HTML instead of JSON (likely error page). Check Vercel deployment logs.')
+          }
+          throw new Error(`Server returned non-JSON response (${clearContentType})`)
+        }
+        clearData = JSON.parse(clearResponseText)
+      } catch (parseError: any) {
+        console.error('Error parsing clear-transactions response:', parseError)
+        console.error('Response text:', clearResponseText.substring(0, 300))
+        throw new Error(`Failed to parse server response: ${parseError.message}`)
       }
 
       console.log('✅ Old transactions cleared')
@@ -360,10 +426,39 @@ export default function PositionsPage() {
         body: JSON.stringify({ walletAddress: walletSyncAddress }),
       })
 
-      const data = await syncResponse.json()
+      // Read response as text first to handle non-JSON responses
+      const syncResponseText = await syncResponse.text()
+      const syncContentType = syncResponse.headers.get('content-type') || ''
+
+      // Parse JSON response with proper error handling
+      let data: any
+      try {
+        if (!syncResponseText || syncResponseText.trim().length === 0) {
+          throw new Error('Empty response from server')
+        }
+        
+        // Check content type
+        if (!syncContentType.includes('application/json')) {
+          // Check if it's HTML error page
+          if (syncResponseText.trim().startsWith('<!DOCTYPE') || syncResponseText.trim().startsWith('<html')) {
+            throw new Error(`Server returned HTML instead of JSON (likely error page). Status: ${syncResponse.status}. This usually means the API route timed out or there's a server error. Check Vercel logs.`)
+          }
+          throw new Error(`Server returned non-JSON response (${syncContentType}). Status: ${syncResponse.status}. Response preview: ${syncResponseText.substring(0, 300)}`)
+        }
+
+        data = JSON.parse(syncResponseText)
+      } catch (parseError: any) {
+        console.error('❌ JSON parse error:', parseError.message)
+        console.error('❌ Response text (first 500 chars):', syncResponseText.substring(0, 500))
+        // Check if it's HTML
+        if (syncResponseText.trim().startsWith('<!DOCTYPE') || syncResponseText.trim().startsWith('<html')) {
+          throw new Error(`Server returned HTML instead of JSON (likely error page). Status: ${syncResponse.status}. This usually means the API route timed out or there's a server error. Check Vercel logs.`)
+        }
+        throw new Error(`Failed to parse server response as JSON: ${parseError.message}. Status: ${syncResponse.status}. Response preview: ${syncResponseText.substring(0, 300)}`)
+      }
 
       if (!syncResponse.ok) {
-        throw new Error(data.details || data.error || 'Failed to sync wallet')
+        throw new Error(data.details || data.error || `Failed to sync wallet: ${syncResponse.status} ${syncResponse.statusText}`)
       }
 
       setWalletSyncResult(data)

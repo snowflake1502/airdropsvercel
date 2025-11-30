@@ -27,9 +27,14 @@ export async function POST(request: NextRequest) {
   try {
     // Ensure we always return JSON, even if request parsing fails
     let walletAddress: string;
+    let txLimit: number = 15; // Default to 15 transactions (7.5 seconds with 500ms delay)
     try {
       const body = await request.json();
       walletAddress = body.walletAddress;
+      // Allow override of transaction limit (max 50 for safety)
+      if (body.limit && typeof body.limit === 'number') {
+        txLimit = Math.min(Math.max(1, body.limit), 50); // Clamp between 1 and 50
+      }
     } catch (parseError: any) {
       return NextResponse.json(
         { error: 'Invalid request body', details: parseError.message },
@@ -122,13 +127,14 @@ export async function POST(request: NextRequest) {
     }
 
     // Step 2: Fetch full transaction details in batches
-    // Process first 50 transactions (Helius can handle this easily)
-    // Can be increased further with paid RPC tier
-    const txLimit = Math.min(50, signatures.length);
-    const signaturestoFetch = signatures.slice(0, txLimit).map((s) => s.signature);
+    // Process transactions (default: 15, configurable up to 50)
+    // 15 transactions × 500ms = 7.5 seconds (safe for Vercel free tier)
+    // Can be increased via limit parameter for users with Pro tier
+    const actualLimit = Math.min(txLimit, signatures.length);
+    const signaturestoFetch = signatures.slice(0, actualLimit).map((s) => s.signature);
 
-    console.log(`Fetching details for ${signaturestoFetch.length} transactions...`);
-    console.log('⏱️  Using 500ms delay between requests...');
+    console.log(`Fetching details for ${signaturestoFetch.length} transactions (limit: ${txLimit})...`);
+    console.log(`⏱️  Using 500ms delay between requests (estimated time: ${(signaturestoFetch.length * 500) / 1000}s)...`);
     const transactions = await getTransactionsBatch(signaturestoFetch, 500); // 500ms = 2 req/sec (safe for Helius free tier)
 
     // Step 3: Filter for Meteora transactions
@@ -142,7 +148,7 @@ export async function POST(request: NextRequest) {
         success: true,
         message: 'No Meteora transactions found for this wallet',
         stats: {
-          totalTransactions: txLimit,
+          totalTransactions: actualLimit,
           meteoraTransactions: 0,
           positionsFound: 0,
           feeClaimsFound: 0,
@@ -220,7 +226,7 @@ export async function POST(request: NextRequest) {
 
     // Step 6: Calculate statistics
     const stats = {
-      totalTransactions: txLimit,
+      totalTransactions: actualLimit,
       meteoraTransactions: parsedTransactions.length,
       transactionsStored: stored.length,
       positionsFound: stored.filter((tx) => tx.type === 'position_open').length,
