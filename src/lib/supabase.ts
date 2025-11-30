@@ -29,14 +29,20 @@ if (isBuildTime && (!clientUrl || !clientKey)) {
   clientKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBsYWNlaG9sZGVyIiwicm9sZSI6ImFub24iLCJpYXQiOjE2NDUxOTIwMDAsImV4cCI6MTk2MDc2ODAwMH0.placeholder'
 }
 
-// Runtime check - throw error if still missing (shouldn't happen if env vars are set in Vercel)
+// Runtime check - log warning if missing (don't throw to prevent client-side crashes)
+// The client will still be created with placeholder values, but operations will fail gracefully
 if (!isBuildTime && (!finalSupabaseUrl || !finalSupabaseKey)) {
-  throw new Error(
-    'Missing Supabase environment variables. Please set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY in your Vercel environment variables.'
+  console.error(
+    '⚠️ Missing Supabase environment variables. Please set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY in your Vercel environment variables.'
   )
+  // Don't throw - allow app to load and show error in UI instead
 }
 
-export const supabase = createClient(clientUrl, clientKey, {
+// Ensure we have valid values (use placeholders if missing to prevent crashes)
+const safeClientUrl = clientUrl || 'https://placeholder.supabase.co'
+const safeClientKey = clientKey || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBsYWNlaG9sZGVyIiwicm9sZSI6ImFub24iLCJpYXQiOjE2NDUxOTIwMDAsImV4cCI6MTk2MDc2ODAwMH0.placeholder'
+
+export const supabase = createClient(safeClientUrl, safeClientKey, {
   auth: {
     autoRefreshToken: true,
     persistSession: true,
