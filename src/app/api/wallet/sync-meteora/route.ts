@@ -27,13 +27,15 @@ export async function POST(request: NextRequest) {
   try {
     // Ensure we always return JSON, even if request parsing fails
     let walletAddress: string;
-    let txLimit: number = 15; // Default to 15 transactions (7.5 seconds with 500ms delay)
+    let txLimit: number = 50; // Default to 50 transactions (25 seconds with 500ms delay)
+    // Note: 50 transactions may timeout on Vercel free tier (10s limit). 
+    // Consider upgrading to Pro (60s limit) or reducing limit if needed.
     try {
       const body = await request.json();
       walletAddress = body.walletAddress;
-      // Allow override of transaction limit (max 50 for safety)
+      // Allow override of transaction limit (max 100 for Pro tier users)
       if (body.limit && typeof body.limit === 'number') {
-        txLimit = Math.min(Math.max(1, body.limit), 50); // Clamp between 1 and 50
+        txLimit = Math.min(Math.max(1, body.limit), 100); // Clamp between 1 and 100
       }
     } catch (parseError: any) {
       return NextResponse.json(
@@ -113,9 +115,9 @@ export async function POST(request: NextRequest) {
     }
 
     // Step 2: Fetch full transaction details in batches
-    // Process transactions (default: 15, configurable up to 50)
-    // 15 transactions × 500ms = 7.5 seconds (safe for Vercel free tier)
-    // Can be increased via limit parameter for users with Pro tier
+    // Process transactions (default: 50, configurable up to 100)
+    // 50 transactions × 500ms = 25 seconds (requires Vercel Pro tier - 60s limit)
+    // For free tier (10s limit), use limit: 15 in request body
     const actualLimit = Math.min(txLimit, signatures.length);
     const signaturestoFetch = signatures.slice(0, actualLimit).map((s) => s.signature);
 
