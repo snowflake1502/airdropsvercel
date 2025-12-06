@@ -2,6 +2,14 @@
 
 import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
+import { 
+  getTasksForDate, 
+  toggleTaskCompletion, 
+  saveTaskCompletion,
+  getPendingTasks,
+  getWeeklySummary,
+  TaskCompletion 
+} from '@/lib/task-storage'
 
 interface ProtocolTarget {
   id: string
@@ -29,11 +37,15 @@ interface Activity {
 }
 
 interface DailyTask {
+  id: string
   protocol: string
   task: string
   points: number
   completed: boolean
+  autoDetected: boolean
   icon: string
+  instruction: string
+  link?: string
 }
 
 // Protocol point targets based on known airdrop criteria
@@ -152,68 +164,136 @@ const analyzeActivity = (transactions: any[]): ActivityStatus => {
   }
 }
 
+// Task definitions with instructions
+const TASK_DEFINITIONS = {
+  'meteora-lp': {
+    task: 'Maintain LP Position',
+    protocol: 'Meteora',
+    points: 50,
+    icon: '🌊',
+    instruction: 'Keep an active liquidity position on Meteora DLMM',
+    link: 'https://app.meteora.ag/dlmm'
+  },
+  'jupiter-swap': {
+    task: 'Make a Swap',
+    protocol: 'Jupiter',
+    points: 10,
+    icon: '🪐',
+    instruction: 'Swap any token on Jupiter Exchange (min $1)',
+    link: 'https://jup.ag'
+  },
+  'sanctum-lst': {
+    task: 'Check LST Position',
+    protocol: 'Sanctum',
+    points: 40,
+    icon: '⭐',
+    instruction: 'Hold or stake SOL in a Sanctum LST (e.g., INF, bSOL)',
+    link: 'https://app.sanctum.so'
+  },
+  'meteora-fees': {
+    task: 'Claim Fees',
+    protocol: 'Meteora',
+    points: 25,
+    icon: '💰',
+    instruction: 'Claim accumulated fees from your Meteora position',
+    link: 'https://app.meteora.ag/dlmm'
+  },
+  'weekly-review': {
+    task: 'Weekly Review & Rebalance',
+    protocol: 'All',
+    points: 50,
+    icon: '📊',
+    instruction: 'Review all positions, rebalance if out of range, check APRs',
+    link: undefined
+  },
+  'weekly-plan': {
+    task: 'Plan Next Week Strategy',
+    protocol: 'All',
+    points: 20,
+    icon: '📋',
+    instruction: 'Review airdrop opportunities and plan activities for the week',
+    link: undefined
+  },
+  'jupiter-limit': {
+    task: 'Place Limit Order',
+    protocol: 'Jupiter',
+    points: 20,
+    icon: '📈',
+    instruction: 'Set a limit order on Jupiter (any amount)',
+    link: 'https://jup.ag/limit'
+  },
+  'jupiter-perp': {
+    task: 'Perp Trade',
+    protocol: 'Jupiter',
+    points: 30,
+    icon: '📉',
+    instruction: 'Open a perpetual position on Jupiter Perps',
+    link: 'https://jup.ag/perps'
+  },
+}
+
 // Generate daily tasks based on day of week and activity status
 const generateDailyTasks = (activityStatus: ActivityStatus): DailyTask[] => {
   const dayOfWeek = getDayOfWeek()
   const tasks: DailyTask[] = []
   
   // Meteora - always active if you have a position
+  const meteoraLp = TASK_DEFINITIONS['meteora-lp']
   tasks.push({
-    protocol: 'Meteora',
-    task: 'Maintain LP Position',
-    points: 50,
-    completed: activityStatus.hasActivePosition, // Auto-detect!
-    icon: '🌊'
+    id: 'meteora-lp',
+    ...meteoraLp,
+    completed: activityStatus.hasActivePosition,
+    autoDetected: activityStatus.hasActivePosition,
   })
   
   // Rotate other tasks by day
-  if (dayOfWeek === 1 || dayOfWeek === 4) { // Mon, Thu
+  if (dayOfWeek === 1 || dayOfWeek === 4) { // Mon, Thu - Jupiter day
+    const jupSwap = TASK_DEFINITIONS['jupiter-swap']
     tasks.push({
-      protocol: 'Jupiter',
-      task: 'Make a Swap',
-      points: 10,
-      completed: false, // Would need Jupiter transaction tracking
-      icon: '🪐'
+      id: 'jupiter-swap',
+      ...jupSwap,
+      completed: false,
+      autoDetected: false,
     })
   }
   
-  if (dayOfWeek === 2 || dayOfWeek === 5) { // Tue, Fri
+  if (dayOfWeek === 2 || dayOfWeek === 5) { // Tue, Fri - Sanctum day
+    const sanctumLst = TASK_DEFINITIONS['sanctum-lst']
     tasks.push({
-      protocol: 'Sanctum',
-      task: 'Check LST Position',
-      points: 40,
-      completed: false, // Would need Sanctum transaction tracking
-      icon: '⭐'
+      id: 'sanctum-lst',
+      ...sanctumLst,
+      completed: false,
+      autoDetected: false,
     })
   }
   
   if (dayOfWeek === 3) { // Wed - claim day
+    const meteoraFees = TASK_DEFINITIONS['meteora-fees']
     tasks.push({
-      protocol: 'Meteora',
-      task: 'Claim Fees',
-      points: 25,
-      completed: activityStatus.claimedFeesToday, // Auto-detect!
-      icon: '💰'
+      id: 'meteora-fees',
+      ...meteoraFees,
+      completed: activityStatus.claimedFeesToday,
+      autoDetected: activityStatus.claimedFeesToday,
     })
   }
   
   if (dayOfWeek === 6) { // Sat - review day
+    const weeklyReview = TASK_DEFINITIONS['weekly-review']
     tasks.push({
-      protocol: 'All',
-      task: 'Weekly Review & Rebalance',
-      points: 50,
-      completed: activityStatus.rebalancedThisWeek || activityStatus.totalTransactionsThisWeek >= 3, // Auto-detect!
-      icon: '📊'
+      id: 'weekly-review',
+      ...weeklyReview,
+      completed: activityStatus.rebalancedThisWeek || activityStatus.totalTransactionsThisWeek >= 3,
+      autoDetected: activityStatus.rebalancedThisWeek || activityStatus.totalTransactionsThisWeek >= 3,
     })
   }
   
   if (dayOfWeek === 0) { // Sun - rest day
+    const weeklyPlan = TASK_DEFINITIONS['weekly-plan']
     tasks.push({
-      protocol: 'All',
-      task: 'Plan Next Week Strategy',
-      points: 20,
-      completed: activityStatus.totalTransactionsThisWeek > 0, // Had activity = planned
-      icon: '📋'
+      id: 'weekly-plan',
+      ...weeklyPlan,
+      completed: activityStatus.totalTransactionsThisWeek > 0,
+      autoDetected: activityStatus.totalTransactionsThisWeek > 0,
     })
   }
   
@@ -234,10 +314,103 @@ export default function AirdropQuest({ userId, walletAddress, transactions }: Ai
   const [streak, setStreak] = useState(0)
   const [expandedProtocol, setExpandedProtocol] = useState<string | null>(null)
   const [activityStatus, setActivityStatus] = useState<ActivityStatus | null>(null)
+  const [pendingTasks, setPendingTasks] = useState<TaskCompletion[]>([])
+  const [showPending, setShowPending] = useState(false)
+  const [savingTask, setSavingTask] = useState<string | null>(null)
+  const [hoveredTask, setHoveredTask] = useState<string | null>(null)
+
+  const today = new Date().toISOString().split('T')[0]
 
   useEffect(() => {
     calculatePoints()
   }, [transactions])
+
+  useEffect(() => {
+    if (userId && walletAddress) {
+      loadSavedTasks()
+      loadPendingTasks()
+    }
+  }, [userId, walletAddress, dailyTasks.length])
+
+  // Load saved task completions for today
+  const loadSavedTasks = async () => {
+    if (!userId || !walletAddress) return
+    
+    try {
+      const savedTasks = await getTasksForDate(userId, walletAddress, today)
+      if (savedTasks.length > 0) {
+        setDailyTasks(prev => prev.map(task => {
+          const saved = savedTasks.find(s => s.task_id === task.id)
+          if (saved && saved.completed && !task.autoDetected) {
+            return { ...task, completed: true, autoDetected: false }
+          }
+          return task
+        }))
+      }
+    } catch (error) {
+      console.error('Error loading saved tasks:', error)
+    }
+  }
+
+  // Load pending tasks from previous days
+  const loadPendingTasks = async () => {
+    if (!userId || !walletAddress) return
+    
+    try {
+      const pending = await getPendingTasks(userId, walletAddress)
+      setPendingTasks(pending)
+    } catch (error) {
+      console.error('Error loading pending tasks:', error)
+    }
+  }
+
+  // Handle manual task toggle
+  const handleTaskToggle = async (task: DailyTask) => {
+    if (!userId || !walletAddress) return
+    if (task.autoDetected && task.completed) return // Can't manually uncheck auto-detected
+    
+    setSavingTask(task.id)
+    
+    try {
+      const newStatus = await toggleTaskCompletion(
+        userId,
+        walletAddress,
+        task.id,
+        today,
+        task.protocol,
+        task.task,
+        task.points
+      )
+      
+      setDailyTasks(prev => prev.map(t => 
+        t.id === task.id ? { ...t, completed: newStatus, autoDetected: false } : t
+      ))
+    } catch (error) {
+      console.error('Error toggling task:', error)
+    } finally {
+      setSavingTask(null)
+    }
+  }
+
+  // Handle completing a pending task from previous days
+  const handlePendingTaskComplete = async (task: TaskCompletion) => {
+    if (!userId || !walletAddress) return
+    
+    try {
+      await toggleTaskCompletion(
+        userId,
+        walletAddress,
+        task.task_id,
+        task.task_date,
+        task.protocol,
+        task.task_name,
+        task.points
+      )
+      loadPendingTasks()
+    } catch (error) {
+      console.error('Error completing pending task:', error)
+    }
+  }
 
   const calculatePoints = () => {
     // Analyze activity status from transactions
@@ -370,7 +543,7 @@ export default function AirdropQuest({ userId, walletAddress, transactions }: Ai
   }
 
   const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-  const today = getDayOfWeek()
+  const currentDayOfWeek = getDayOfWeek()
 
   return (
     <div className="space-y-6">
@@ -417,7 +590,7 @@ export default function AirdropQuest({ userId, walletAddress, transactions }: Ai
           <h3 className="text-lg font-semibold text-white flex items-center gap-2">
             📅 Today&apos;s Tasks
             <span className="text-xs bg-cyan-500/20 text-cyan-400 px-2 py-0.5 rounded-full">
-              {dayNames[today]}
+              {dayNames[currentDayOfWeek]}
             </span>
           </h3>
           <span className="text-slate-400 text-sm">{new Date().toLocaleDateString()}</span>
@@ -429,64 +602,131 @@ export default function AirdropQuest({ userId, walletAddress, transactions }: Ai
             <div
               key={day}
               className={`flex-1 text-center py-2 rounded-lg text-xs font-medium transition-all ${
-                idx === today
+                idx === currentDayOfWeek
                   ? 'bg-gradient-to-r from-cyan-500 to-violet-500 text-white'
-                  : idx < today
+                  : idx < currentDayOfWeek
                   ? 'bg-emerald-500/20 text-emerald-400'
                   : 'bg-slate-700/50 text-slate-500'
               }`}
             >
               {day}
-              {idx < today && <span className="ml-1">✓</span>}
+              {idx < currentDayOfWeek && <span className="ml-1">✓</span>}
             </div>
           ))}
         </div>
         
         {/* Task List */}
         <div className="space-y-2">
-          {dailyTasks.map((task, idx) => (
+          {dailyTasks.map((task) => (
             <div
-              key={idx}
-              className={`flex items-center justify-between p-4 rounded-xl border transition-all ${
+              key={task.id}
+              className={`relative p-4 rounded-xl border transition-all ${
                 task.completed
                   ? 'bg-gradient-to-r from-emerald-500/20 to-emerald-500/10 border-emerald-500/40 shadow-lg shadow-emerald-500/10'
-                  : 'bg-slate-800/50 border-slate-700/50 hover:border-slate-600/50'
+                  : 'bg-slate-800/50 border-slate-700/50 hover:border-cyan-500/50'
               }`}
+              onMouseEnter={() => setHoveredTask(task.id)}
+              onMouseLeave={() => setHoveredTask(null)}
             >
-              <div className="flex items-center gap-3">
-                <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
-                  task.completed ? 'bg-emerald-500/30' : 'bg-slate-700/50'
-                }`}>
-                  <span className="text-xl">{task.icon}</span>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3 flex-1">
+                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${
+                    task.completed ? 'bg-emerald-500/30' : 'bg-slate-700/50'
+                  }`}>
+                    <span className="text-xl">{task.icon}</span>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className={`font-medium ${task.completed ? 'text-emerald-400' : 'text-white'}`}>
+                        {task.task}
+                      </p>
+                      {task.completed && task.autoDetected && (
+                        <span className="text-xs bg-cyan-500/20 text-cyan-400 px-2 py-0.5 rounded-full">
+                          ✨ Auto-detected
+                        </span>
+                      )}
+                      {task.completed && !task.autoDetected && (
+                        <span className="text-xs bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded-full">
+                          ✓ Done
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <span className="text-slate-500 text-xs">{task.protocol}</span>
+                      <span className="text-slate-600">•</span>
+                      <span className="text-slate-400 text-xs truncate">{task.instruction}</span>
+                    </div>
+                  </div>
                 </div>
-                <div>
-                  <p className={`font-medium ${task.completed ? 'text-emerald-400' : 'text-white'}`}>
-                    {task.task}
-                    {task.completed && <span className="ml-2 text-xs">✨ Completed!</span>}
-                  </p>
-                  <p className="text-slate-500 text-xs">{task.protocol}</p>
-                </div>
-              </div>
-              <div className="flex items-center gap-3">
-                <span className={`font-semibold ${task.completed ? 'text-emerald-400' : 'text-cyan-400'}`}>
-                  {task.completed ? '✓ ' : '+'}{task.points} pts
-                </span>
-                <div
-                  className={`w-8 h-8 rounded-full flex items-center justify-center transition-all ${
-                    task.completed
-                      ? 'bg-gradient-to-r from-emerald-500 to-emerald-400 text-white shadow-lg shadow-emerald-500/30'
-                      : 'border-2 border-slate-600 hover:border-cyan-500'
-                  }`}
-                >
-                  {task.completed ? (
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                    </svg>
-                  ) : (
-                    <span className="w-3 h-3 rounded-full bg-slate-600"></span>
+                
+                <div className="flex items-center gap-3 ml-3">
+                  {/* Link button */}
+                  {task.link && (
+                    <a
+                      href={task.link}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="p-2 rounded-lg bg-slate-700/50 hover:bg-cyan-500/20 text-slate-400 hover:text-cyan-400 transition-all"
+                      title="Open protocol"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                      </svg>
+                    </a>
                   )}
+                  
+                  <span className={`font-semibold whitespace-nowrap ${task.completed ? 'text-emerald-400' : 'text-cyan-400'}`}>
+                    {task.completed ? '✓ ' : '+'}{task.points} pts
+                  </span>
+                  
+                  {/* Toggle button */}
+                  <button
+                    onClick={() => handleTaskToggle(task)}
+                    disabled={savingTask === task.id || (task.autoDetected && task.completed)}
+                    className={`w-8 h-8 rounded-full flex items-center justify-center transition-all ${
+                      task.completed
+                        ? task.autoDetected
+                          ? 'bg-gradient-to-r from-cyan-500 to-cyan-400 text-white cursor-not-allowed'
+                          : 'bg-gradient-to-r from-emerald-500 to-emerald-400 text-white shadow-lg shadow-emerald-500/30 hover:opacity-80'
+                        : 'border-2 border-slate-600 hover:border-cyan-500 hover:bg-cyan-500/10 cursor-pointer'
+                    } ${savingTask === task.id ? 'opacity-50' : ''}`}
+                    title={
+                      task.autoDetected && task.completed 
+                        ? 'Auto-detected from on-chain activity' 
+                        : task.completed 
+                          ? 'Click to unmark' 
+                          : 'Click to mark as done'
+                    }
+                  >
+                    {savingTask === task.id ? (
+                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    ) : task.completed ? (
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                      </svg>
+                    ) : (
+                      <span className="w-3 h-3 rounded-full bg-slate-600"></span>
+                    )}
+                  </button>
                 </div>
               </div>
+              
+              {/* Tooltip on hover */}
+              {hoveredTask === task.id && !task.completed && (
+                <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg shadow-xl z-10 whitespace-nowrap">
+                  <p className="text-sm text-white font-medium">How to complete:</p>
+                  <p className="text-xs text-slate-400 mt-1">{task.instruction}</p>
+                  {task.link && (
+                    <p className="text-xs text-cyan-400 mt-1 flex items-center gap-1">
+                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                      </svg>
+                      Click link to open protocol
+                    </p>
+                  )}
+                  <div className="absolute bottom-0 left-1/2 -translate-x-1/2 translate-y-1/2 w-2 h-2 bg-slate-900 border-r border-b border-slate-700 transform rotate-45"></div>
+                </div>
+              )}
             </div>
           ))}
         </div>
@@ -515,6 +755,66 @@ export default function AirdropQuest({ userId, walletAddress, transactions }: Ai
                 style={{ width: `${(dailyTasks.filter(t => t.completed).length / dailyTasks.length) * 100}%` }}
               />
             </div>
+          </div>
+        )}
+
+        {/* Pending Tasks from Previous Days */}
+        {pendingTasks.length > 0 && (
+          <div className="mt-4">
+            <button
+              onClick={() => setShowPending(!showPending)}
+              className="w-full flex items-center justify-between p-3 bg-amber-500/10 rounded-xl border border-amber-500/30 hover:bg-amber-500/15 transition-all"
+            >
+              <div className="flex items-center gap-2">
+                <span className="text-lg">⏰</span>
+                <span className="text-amber-400 font-medium">
+                  {pendingTasks.length} Pending Task{pendingTasks.length > 1 ? 's' : ''} from Previous Days
+                </span>
+              </div>
+              <svg
+                className={`w-5 h-5 text-amber-400 transition-transform ${showPending ? 'rotate-180' : ''}`}
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+            
+            {showPending && (
+              <div className="mt-2 space-y-2">
+                {pendingTasks.slice(0, 5).map((task) => (
+                  <div
+                    key={`${task.task_id}-${task.task_date}`}
+                    className="flex items-center justify-between p-3 bg-slate-800/30 rounded-xl border border-slate-700/30"
+                  >
+                    <div className="flex items-center gap-3">
+                      <span className="text-amber-500">⚠️</span>
+                      <div>
+                        <p className="text-white text-sm font-medium">{task.task_name}</p>
+                        <p className="text-slate-500 text-xs">
+                          {task.protocol} • {new Date(task.task_date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className="text-cyan-400 text-sm">+{task.points} pts</span>
+                      <button
+                        onClick={() => handlePendingTaskComplete(task)}
+                        className="px-3 py-1.5 text-xs font-medium bg-emerald-500/20 text-emerald-400 rounded-lg hover:bg-emerald-500/30 transition-all"
+                      >
+                        Mark Done
+                      </button>
+                    </div>
+                  </div>
+                ))}
+                {pendingTasks.length > 5 && (
+                  <p className="text-center text-slate-500 text-xs py-2">
+                    + {pendingTasks.length - 5} more pending tasks
+                  </p>
+                )}
+              </div>
+            )}
           </div>
         )}
       </div>
