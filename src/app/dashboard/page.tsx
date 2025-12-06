@@ -91,9 +91,18 @@ export default function HomePage() {
     setSyncStatus('Scanning for new Meteora transactions...')
 
     try {
+      // Get the current session for auth token
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session?.access_token) {
+        throw new Error('Not authenticated. Please sign in again.')
+      }
+
       const response = await fetch('/api/wallet/sync-meteora', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`
+        },
         body: JSON.stringify({ 
           walletAddress: publicKey.toBase58(),
           limit: 30,
