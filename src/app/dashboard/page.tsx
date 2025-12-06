@@ -8,6 +8,7 @@ import DashboardLayout from '@/components/DashboardLayout'
 import { useWallet, useConnection } from '@solana/wallet-adapter-react'
 import { PublicKey, ParsedAccountData } from '@solana/web3.js'
 import Link from 'next/link'
+import AirdropQuest from '@/components/AirdropQuest'
 
 const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'
 
@@ -43,6 +44,7 @@ export default function HomePage() {
   })
   const [solPriceUSD, setSolPriceUSD] = useState(190)
   const [recentActivity, setRecentActivity] = useState<RecentActivity[]>([])
+  const [allTransactions, setAllTransactions] = useState<any[]>([])
   const [loadingStats, setLoadingStats] = useState(false)
   const [syncing, setSyncing] = useState(false)
   const [syncStatus, setSyncStatus] = useState('')
@@ -178,6 +180,9 @@ export default function HomePage() {
         .select('*')
         .eq('user_id', user.id)
         .eq('wallet_address', walletAddress)
+
+      // Store transactions for other components
+      setAllTransactions(transactions || [])
 
       // Calculate P&L
       const opens = transactions?.filter(tx => tx.tx_type === 'position_open') || []
@@ -431,6 +436,15 @@ export default function HomePage() {
             <p className="text-slate-400 text-sm">Total Fees Earned</p>
           </div>
         </div>
+
+        {/* Airdrop Quest - Gamification Section */}
+        {connected && publicKey && user && (
+          <AirdropQuest
+            userId={user.id}
+            walletAddress={publicKey.toBase58()}
+            transactions={allTransactions}
+          />
+        )}
 
         {/* Two Column Layout */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
