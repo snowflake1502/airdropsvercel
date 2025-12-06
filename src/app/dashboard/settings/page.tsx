@@ -5,11 +5,13 @@ import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { User } from '@supabase/supabase-js'
 import DashboardLayout from '@/components/DashboardLayout'
+import { useWallet } from '@solana/wallet-adapter-react'
 
 export default function SettingsPage() {
   const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
   const router = useRouter()
+  const { publicKey, connected, disconnect } = useWallet()
 
   useEffect(() => {
     const checkUser = async () => {
@@ -24,107 +26,165 @@ export default function SettingsPage() {
     checkUser()
   }, [router])
 
+  const handleSignOut = async () => {
+    if (connected) {
+      await disconnect()
+    }
+    await supabase.auth.signOut()
+    router.push('/auth/login')
+  }
+
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-indigo-600"></div>
-      </div>
+      <DashboardLayout>
+        <div className="flex items-center justify-center h-64">
+          <div className="animate-spin rounded-full h-12 w-12 border-2 border-cyan-500 border-t-transparent"></div>
+        </div>
+      </DashboardLayout>
     )
   }
 
   return (
     <DashboardLayout>
-      <div className="space-y-6">
-        <div className="border-b border-gray-200 pb-4">
-          <h1 className="text-2xl font-bold text-gray-900">Settings</h1>
-          <p className="mt-1 text-sm text-gray-600">
-            Manage your account settings and preferences
+      <div className="space-y-6 max-w-3xl">
+        {/* Header */}
+        <div>
+          <h1 className="text-2xl font-bold text-white flex items-center gap-2">
+            ⚙️ Settings
+          </h1>
+          <p className="text-slate-400 mt-1">
+            Manage your account and preferences
           </p>
         </div>
 
         {/* Account Information */}
-        <div className="bg-white rounded-lg shadow p-6">
-          <h2 className="text-lg font-semibold text-gray-900 mb-4">Account Information</h2>
+        <div className="bg-slate-800/30 rounded-2xl border border-slate-700/50 p-6">
+          <h2 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
+            👤 Account Information
+          </h2>
           <div className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700">Email</label>
-              <input
-                type="email"
-                value={user?.email || ''}
-                disabled
-                className="mt-1 block w-full rounded-md border-gray-300 bg-gray-50 shadow-sm px-3 py-2"
-              />
+              <label className="block text-slate-400 text-sm mb-2">Email Address</label>
+              <div className="bg-slate-900/50 border border-slate-700/50 rounded-xl px-4 py-3 text-white">
+                {user?.email || 'Not available'}
+              </div>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700">Account Created</label>
-              <input
-                type="text"
-                value={new Date(user?.created_at || '').toLocaleDateString()}
-                disabled
-                className="mt-1 block w-full rounded-md border-gray-300 bg-gray-50 shadow-sm px-3 py-2"
-              />
+              <label className="block text-slate-400 text-sm mb-2">Account Created</label>
+              <div className="bg-slate-900/50 border border-slate-700/50 rounded-xl px-4 py-3 text-white">
+                {user?.created_at ? new Date(user.created_at).toLocaleDateString() : 'Unknown'}
+              </div>
             </div>
           </div>
         </div>
 
-        {/* Coming Soon Features */}
-        <div className="bg-gradient-to-r from-gray-700 to-gray-900 rounded-lg shadow-lg p-8 text-white">
-          <div className="text-center">
-            <div className="text-6xl mb-4">⚙️</div>
-            <h2 className="text-3xl font-bold mb-2">Additional Settings Coming Soon</h2>
-            <p className="text-lg mb-6">
-              More customization options will be available soon
-            </p>
-            <div className="bg-white bg-opacity-20 rounded-lg p-4 max-w-2xl mx-auto">
-              <h3 className="font-semibold mb-2">Planned Features:</h3>
-              <ul className="text-left space-y-2">
-                <li>✓ Notification preferences (email, push, Discord)</li>
-                <li>✓ Wallet management and connection</li>
-                <li>✓ Privacy settings</li>
-                <li>✓ Data export and backup</li>
-                <li>✓ API key management</li>
-                <li>✓ Theme customization (light/dark mode)</li>
-                <li>✓ Two-factor authentication</li>
-              </ul>
+        {/* Connected Wallet */}
+        <div className="bg-slate-800/30 rounded-2xl border border-slate-700/50 p-6">
+          <h2 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
+            👛 Connected Wallet
+          </h2>
+          {connected && publicKey ? (
+            <div className="space-y-4">
+              <div>
+                <label className="block text-slate-400 text-sm mb-2">Wallet Address</label>
+                <div className="bg-slate-900/50 border border-slate-700/50 rounded-xl px-4 py-3 text-white font-mono text-sm break-all">
+                  {publicKey.toBase58()}
+                </div>
+              </div>
+              <button
+                onClick={() => disconnect()}
+                className="px-4 py-2 bg-red-500/20 hover:bg-red-500/30 text-red-400 rounded-xl text-sm font-medium transition-colors"
+              >
+                Disconnect Wallet
+              </button>
+            </div>
+          ) : (
+            <div className="bg-slate-900/50 border border-slate-700/50 rounded-xl p-6 text-center">
+              <span className="text-3xl mb-2 block">🔌</span>
+              <p className="text-slate-400 text-sm">No wallet connected</p>
+              <p className="text-slate-500 text-xs mt-1">Connect your wallet using the button in the header</p>
+            </div>
+          )}
+        </div>
+
+        {/* Preferences */}
+        <div className="bg-slate-800/30 rounded-2xl border border-slate-700/50 p-6">
+          <h2 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
+            🎨 Preferences
+          </h2>
+          <div className="space-y-4">
+            <div className="flex items-center justify-between py-3 border-b border-slate-700/50">
+              <div>
+                <p className="text-white font-medium">Dark Mode</p>
+                <p className="text-slate-500 text-sm">Always enabled for better experience</p>
+              </div>
+              <div className="px-3 py-1.5 bg-emerald-500/20 text-emerald-400 rounded-lg text-sm font-medium border border-emerald-500/30">
+                Always On
+              </div>
+            </div>
+            <div className="flex items-center justify-between py-3 border-b border-slate-700/50">
+              <div>
+                <p className="text-white font-medium">Email Notifications</p>
+                <p className="text-slate-500 text-sm">Get notified about important updates</p>
+              </div>
+              <span className="px-3 py-1.5 bg-slate-700 text-slate-400 rounded-lg text-sm">Coming Soon</span>
+            </div>
+            <div className="flex items-center justify-between py-3">
+              <div>
+                <p className="text-white font-medium">Auto-refresh Data</p>
+                <p className="text-slate-500 text-sm">Automatically refresh portfolio data</p>
+              </div>
+              <span className="px-3 py-1.5 bg-slate-700 text-slate-400 rounded-lg text-sm">Coming Soon</span>
             </div>
           </div>
         </div>
 
-        {/* Quick Actions */}
-        <div className="bg-white rounded-lg shadow p-6">
-          <h2 className="text-lg font-semibold text-gray-900 mb-4">Quick Actions</h2>
-          <div className="space-y-3">
-            <button className="w-full text-left px-4 py-3 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">
-              <div className="font-medium text-gray-900">Change Password</div>
-              <div className="text-sm text-gray-500">Update your account password</div>
+        {/* Danger Zone */}
+        <div className="bg-red-500/5 rounded-2xl border border-red-500/20 p-6">
+          <h2 className="text-lg font-semibold text-red-400 mb-4 flex items-center gap-2">
+            ⚠️ Danger Zone
+          </h2>
+          <div className="space-y-4">
+            <button
+              onClick={handleSignOut}
+              className="w-full px-4 py-3 bg-slate-800/50 hover:bg-slate-800 text-white rounded-xl text-sm font-medium transition-colors border border-slate-700/50"
+            >
+              Sign Out
             </button>
-            <button className="w-full text-left px-4 py-3 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">
-              <div className="font-medium text-gray-900">Manage Wallets</div>
-              <div className="text-sm text-gray-500">Connect or disconnect Solana wallets</div>
-            </button>
-            <button className="w-full text-left px-4 py-3 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">
-              <div className="font-medium text-gray-900">Export Data</div>
-              <div className="text-sm text-gray-500">Download your airdrop farming data</div>
-            </button>
-            <button className="w-full text-left px-4 py-3 border border-red-200 rounded-lg hover:bg-red-50 transition-colors text-red-600">
-              <div className="font-medium">Delete Account</div>
-              <div className="text-sm text-red-500">Permanently delete your account and data</div>
+            <button
+              className="w-full px-4 py-3 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-xl text-sm font-medium transition-colors border border-red-500/20"
+            >
+              Delete Account
             </button>
           </div>
         </div>
 
         {/* Support */}
-        <div className="bg-blue-50 rounded-lg p-6">
-          <h3 className="font-semibold text-blue-900 mb-2">Need Help?</h3>
-          <p className="text-blue-700 mb-4">
-            Contact our support team or check out the documentation for help with airdrop farming strategies.
+        <div className="bg-gradient-to-r from-cyan-500/10 to-violet-500/10 rounded-2xl border border-cyan-500/20 p-6">
+          <h2 className="text-lg font-semibold text-white mb-2">Need Help?</h2>
+          <p className="text-slate-400 text-sm mb-4">
+            Have questions about airdrop farming or need technical support?
           </p>
-          <button className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition-colors">
-            Contact Support
-          </button>
+          <div className="flex items-center gap-3">
+            <a
+              href="https://twitter.com"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="px-4 py-2 bg-slate-800/50 hover:bg-slate-800 text-white rounded-xl text-sm font-medium transition-colors border border-slate-700/50"
+            >
+              Twitter ↗
+            </a>
+            <a
+              href="https://discord.com"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="px-4 py-2 bg-slate-800/50 hover:bg-slate-800 text-white rounded-xl text-sm font-medium transition-colors border border-slate-700/50"
+            >
+              Discord ↗
+            </a>
+          </div>
         </div>
       </div>
     </DashboardLayout>
   )
 }
-
