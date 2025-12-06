@@ -150,27 +150,79 @@ export default function PortfolioPage() {
       const opens = txData.filter(tx => tx.tx_type === 'position_open')
       const closes = txData.filter(tx => tx.tx_type === 'position_close')
 
-      const openedPositions = new Set(opens.map(tx => tx.position_nft_address).filter(Boolean))
-      const closedPositions = new Set(closes.map(tx => tx.position_nft_address).filter(Boolean))
-      const activePositionAddresses = Array.from(openedPositions).filter(addr => !closedPositions.has(addr))
-
-      const activePositions: Position[] = activePositionAddresses.map(addr => {
-        const openTx = opens
-          .filter(tx => tx.position_nft_address === addr)
-          .sort((a, b) => (b?.block_time || 0) - (a?.block_time || 0))[0]
+      // Match opens to closes by position_nft_address
+      // Build a map of how many times each NFT address was opened/closed
+      const nftOpenCount = new Map<string, { count: number, txs: typeof opens }>()
+      const nftCloseCount = new Map<string, number>()
+      
+      // Track opens without NFT addresses separately
+      const opensWithoutNft: typeof opens = []
+      
+      opens.forEach(tx => {
+        if (tx.position_nft_address) {
+          const existing = nftOpenCount.get(tx.position_nft_address) || { count: 0, txs: [] }
+          existing.count++
+          existing.txs.push(tx)
+          nftOpenCount.set(tx.position_nft_address, existing)
+        } else {
+          opensWithoutNft.push(tx)
+        }
+      })
+      
+      closes.forEach(tx => {
+        if (tx.position_nft_address) {
+          nftCloseCount.set(tx.position_nft_address, (nftCloseCount.get(tx.position_nft_address) || 0) + 1)
+        }
+      })
+      
+      // Build active positions list
+      const activePositions: Position[] = []
+      
+      // Add positions with NFT addresses that are still active
+      nftOpenCount.forEach((data, nftAddr) => {
+        const closeCount = nftCloseCount.get(nftAddr) || 0
+        const activeCount = data.count - closeCount
         
-        return {
-          id: addr,
-          position_address: addr,
-          pool_name: openTx?.position_data?.pool_name || 'SOL-USDC',
-          token_x: 'SOL',
-          token_y: 'USDC',
+        if (activeCount > 0) {
+          // Get the most recent open transaction for this NFT
+          const openTx = data.txs.sort((a, b) => (b?.block_time || 0) - (a?.block_time || 0))[0]
+          
+          activePositions.push({
+            id: nftAddr,
+            position_address: nftAddr,
+            pool_name: openTx?.position_data?.pool_name || `${openTx?.token_x_symbol || 'SOL'}-${openTx?.token_y_symbol || 'USDC'}`,
+            token_x: openTx?.token_x_symbol || 'SOL',
+            token_y: openTx?.token_y_symbol || 'USDC',
+            value_usd: parseFloat(openTx?.total_usd || '0'),
+            unclaimed_fees: 0,
+            apr_24h: 0,
+            is_in_range: true,
+            opened_at: new Date(openTx?.block_time * 1000 || Date.now()),
+          })
+        }
+      })
+      
+      // Add positions without NFT addresses (assumed active)
+      opensWithoutNft.forEach(openTx => {
+        activePositions.push({
+          id: openTx.signature || `pos-${openTx.block_time}`,
+          position_address: openTx.signature || '',
+          pool_name: openTx?.position_data?.pool_name || `${openTx?.token_x_symbol || 'SOL'}-${openTx?.token_y_symbol || 'USDC'}`,
+          token_x: openTx?.token_x_symbol || 'SOL',
+          token_y: openTx?.token_y_symbol || 'USDC',
           value_usd: parseFloat(openTx?.total_usd || '0'),
           unclaimed_fees: 0,
           apr_24h: 0,
           is_in_range: true,
           opened_at: new Date(openTx?.block_time * 1000 || Date.now()),
-        }
+        })
+      })
+
+      console.log('📊 Portfolio positions:', {
+        totalOpens: opens.length,
+        totalCloses: closes.length,
+        opensWithoutNft: opensWithoutNft.length,
+        activePositions: activePositions.length
       })
 
       setPositions(activePositions)
