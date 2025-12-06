@@ -188,58 +188,62 @@ export default function HomePage() {
       const totalWithdrawn = closes.reduce((sum, tx) => sum + Math.abs(parseFloat(tx.total_usd) || 0), 0)
       const totalFees = fees.reduce((sum, tx) => sum + Math.abs(parseFloat(tx.total_usd) || 0), 0)
 
-      // Current position value estimation
-      // Use position_nft_address if available, otherwise use signature as identifier
-      const openedPositions = new Set(opens.map(tx => tx.position_nft_address || tx.signature).filter(Boolean))
-      const closedPositions = new Set(closes.map(tx => tx.position_nft_address || tx.signature).filter(Boolean))
+      // Match opens to closes by position_nft_address
+      // Build a map of how many times each NFT address was opened/closed
+      const nftOpenCounts = new Map<string, number>()
+      const nftCloseCounts = new Map<string, number>()
       
-      // Also match closes to opens by checking if any close references the same pool/time range
-      const closedNftAddresses = new Set(closes.map(tx => tx.position_nft_address).filter(Boolean))
+      // Track opens without NFT addresses separately (these are likely active)
+      let opensWithoutNft = 0
       
-      // Find active positions: opened but not closed
-      // For positions with NFT address, check if NFT was closed
-      // For positions without NFT address (fallback to signature), they are considered active unless explicitly closed
-      const activePositionIds: string[] = []
-      
-      opens.forEach(openTx => {
-        const posId = openTx.position_nft_address || openTx.signature
-        if (!posId) return
-        
-        // Check if this position was closed
-        const wasClosed = openTx.position_nft_address 
-          ? closedNftAddresses.has(openTx.position_nft_address)
-          : false // If no NFT address, assume not closed unless we find a matching close
-        
-        if (!wasClosed && !activePositionIds.includes(posId)) {
-          activePositionIds.push(posId)
+      opens.forEach(tx => {
+        if (tx.position_nft_address) {
+          nftOpenCounts.set(tx.position_nft_address, (nftOpenCounts.get(tx.position_nft_address) || 0) + 1)
+        } else {
+          opensWithoutNft++
         }
+      })
+      
+      closes.forEach(tx => {
+        if (tx.position_nft_address) {
+          nftCloseCounts.set(tx.position_nft_address, (nftCloseCounts.get(tx.position_nft_address) || 0) + 1)
+        }
+      })
+      
+      // Calculate active positions: for each NFT, opens - closes
+      let activePositionCount = opensWithoutNft // All opens without NFT are considered active
+      
+      nftOpenCounts.forEach((openCount, nftAddr) => {
+        const closeCount = nftCloseCounts.get(nftAddr) || 0
+        const activeForThisNft = Math.max(0, openCount - closeCount)
+        activePositionCount += activeForThisNft
       })
 
-      let currentPositionValue = 0
-      activePositionIds.forEach(posId => {
-        const openTx = opens.find(tx => (tx.position_nft_address || tx.signature) === posId)
-        if (openTx) {
-          currentPositionValue += parseFloat(openTx.total_usd || '0')
-        }
-      })
+      // REALIZED P&L = What you got back - What you put in
+      // This doesn't include unrealized gains/losses from active positions
+      const realizedPnL = (totalWithdrawn + totalFees) - totalInvested
 
       // Debug logging
       console.log('📊 Position calculation:', {
         totalOpens: opens.length,
         totalCloses: closes.length,
-        activePositions: activePositionIds.length,
-        currentPositionValue,
-        openIds: opens.map(tx => ({ nft: tx.position_nft_address, sig: tx.signature?.slice(0,8) }))
+        opensWithoutNft,
+        activePositions: activePositionCount,
+        totalInvested,
+        totalWithdrawn,
+        totalFees,
+        realizedPnL,
+        nftAddresses: Array.from(nftOpenCounts.keys()).map(k => k.slice(0,8))
       })
 
-      const totalPnL = (currentPositionValue + totalWithdrawn + totalFees) - totalInvested
+      const totalPnL = realizedPnL
       const totalValueUSD = (solBalance * solPriceUSD) + usdcBalance
 
       setStats({
         totalValueUSD,
         solBalance,
         usdcBalance,
-        activePositions: activePositionIds.length,
+        activePositions: activePositionCount,
         totalPnL,
         pendingAirdrops: 3, // Meteora, Jupiter, Sanctum
         unclaimedFees: totalFees,
