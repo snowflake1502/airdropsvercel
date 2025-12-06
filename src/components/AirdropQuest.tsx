@@ -91,8 +91,69 @@ const PROTOCOL_CONFIGS: Omit<ProtocolTarget, 'currentPoints' | 'streak' | 'lastA
 const getDayOfWeek = () => new Date().getDay()
 const getWeekOfMonth = () => Math.ceil(new Date().getDate() / 7)
 
-// Generate daily tasks based on day of week
-const generateDailyTasks = (protocols: ProtocolTarget[]): DailyTask[] => {
+// Check if a date is today
+const isToday = (timestamp: number) => {
+  const date = new Date(timestamp * 1000)
+  const today = new Date()
+  return date.toDateString() === today.toDateString()
+}
+
+// Check if a date is this week
+const isThisWeek = (timestamp: number) => {
+  const date = new Date(timestamp * 1000)
+  const today = new Date()
+  const startOfWeek = new Date(today)
+  startOfWeek.setDate(today.getDate() - today.getDay()) // Sunday
+  startOfWeek.setHours(0, 0, 0, 0)
+  return date >= startOfWeek
+}
+
+interface ActivityStatus {
+  hasActivePosition: boolean
+  claimedFeesToday: boolean
+  claimedFeesThisWeek: boolean
+  openedPositionToday: boolean
+  openedPositionThisWeek: boolean
+  rebalancedThisWeek: boolean
+  totalTransactionsToday: number
+  totalTransactionsThisWeek: number
+}
+
+// Analyze transactions to determine activity status
+const analyzeActivity = (transactions: any[]): ActivityStatus => {
+  const opens = transactions.filter(tx => tx.tx_type === 'position_open')
+  const closes = transactions.filter(tx => tx.tx_type === 'position_close')
+  const fees = transactions.filter(tx => tx.tx_type === 'fee_claim')
+  
+  // Check if there's an active position (more opens than closes)
+  const hasActivePosition = opens.length > closes.length
+  
+  // Check today's activity
+  const claimedFeesToday = fees.some(tx => isToday(tx.block_time))
+  const openedPositionToday = opens.some(tx => isToday(tx.block_time))
+  const totalTransactionsToday = transactions.filter(tx => isToday(tx.block_time)).length
+  
+  // Check this week's activity
+  const claimedFeesThisWeek = fees.some(tx => isThisWeek(tx.block_time))
+  const openedPositionThisWeek = opens.some(tx => isThisWeek(tx.block_time))
+  const closedPositionThisWeek = closes.some(tx => isThisWeek(tx.block_time))
+  const rebalancedThisWeek = openedPositionThisWeek && closedPositionThisWeek
+  const totalTransactionsThisWeek = transactions.filter(tx => isThisWeek(tx.block_time)).length
+  
+  return {
+    hasActivePosition,
+    claimedFeesToday,
+    claimedFeesThisWeek,
+    openedPositionToday,
+    openedPositionThisWeek,
+    rebalancedThisWeek,
+    totalTransactionsToday,
+    totalTransactionsThisWeek,
+  }
+}
+
+// Generate daily tasks based on day of week and activity status
+const generateDailyTasks = (activityStatus: ActivityStatus): DailyTask[] => {
   const dayOfWeek = getDayOfWeek()
   const tasks: DailyTask[] = []
   
@@ -101,7 +162,7 @@ const generateDailyTasks = (protocols: ProtocolTarget[]): DailyTask[] => {
     protocol: 'Meteora',
     task: 'Maintain LP Position',
     points: 50,
-    completed: false,
+    completed: activityStatus.hasActivePosition, // Auto-detect!
     icon: '🌊'
   })
   
@@ -111,7 +172,7 @@ const generateDailyTasks = (protocols: ProtocolTarget[]): DailyTask[] => {
       protocol: 'Jupiter',
       task: 'Make a Swap',
       points: 10,
-      completed: false,
+      completed: false, // Would need Jupiter transaction tracking
       icon: '🪐'
     })
   }
@@ -121,7 +182,7 @@ const generateDailyTasks = (protocols: ProtocolTarget[]): DailyTask[] => {
       protocol: 'Sanctum',
       task: 'Check LST Position',
       points: 40,
-      completed: false,
+      completed: false, // Would need Sanctum transaction tracking
       icon: '⭐'
     })
   }
@@ -131,7 +192,7 @@ const generateDailyTasks = (protocols: ProtocolTarget[]): DailyTask[] => {
       protocol: 'Meteora',
       task: 'Claim Fees',
       points: 25,
-      completed: false,
+      completed: activityStatus.claimedFeesToday, // Auto-detect!
       icon: '💰'
     })
   }
@@ -141,7 +202,7 @@ const generateDailyTasks = (protocols: ProtocolTarget[]): DailyTask[] => {
       protocol: 'All',
       task: 'Weekly Review & Rebalance',
       points: 50,
-      completed: false,
+      completed: activityStatus.rebalancedThisWeek || activityStatus.totalTransactionsThisWeek >= 3, // Auto-detect!
       icon: '📊'
     })
   }
@@ -151,7 +212,7 @@ const generateDailyTasks = (protocols: ProtocolTarget[]): DailyTask[] => {
       protocol: 'All',
       task: 'Plan Next Week Strategy',
       points: 20,
-      completed: false,
+      completed: activityStatus.totalTransactionsThisWeek > 0, // Had activity = planned
       icon: '📋'
     })
   }
@@ -172,12 +233,17 @@ export default function AirdropQuest({ userId, walletAddress, transactions }: Ai
   const [level, setLevel] = useState(1)
   const [streak, setStreak] = useState(0)
   const [expandedProtocol, setExpandedProtocol] = useState<string | null>(null)
+  const [activityStatus, setActivityStatus] = useState<ActivityStatus | null>(null)
 
   useEffect(() => {
     calculatePoints()
   }, [transactions])
 
   const calculatePoints = () => {
+    // Analyze activity status from transactions
+    const status = analyzeActivity(transactions)
+    setActivityStatus(status)
+    
     // Calculate points based on transaction history
     const opens = transactions.filter(tx => tx.tx_type === 'position_open')
     const closes = transactions.filter(tx => tx.tx_type === 'position_close')
@@ -199,15 +265,13 @@ export default function AirdropQuest({ userId, walletAddress, transactions }: Ai
     meteoraPoints += uniqueDays.size * 10
     
     // Bonus for maintaining positions
-    const hasActivePosition = opens.length > closes.length
-    if (hasActivePosition) {
+    if (status.hasActivePosition) {
       meteoraPoints += 100 // Active position bonus
     }
     
-    // Calculate streak (consecutive days with activity)
+    // Bonus for streaks
     let currentStreak = 0
     const sortedDates = Array.from(uniqueDays).sort().reverse()
-    const today = new Date().toDateString()
     
     for (let i = 0; i < sortedDates.length; i++) {
       const date = new Date(sortedDates[i])
@@ -221,9 +285,13 @@ export default function AirdropQuest({ userId, walletAddress, transactions }: Ai
       }
     }
     
+    // Streak bonus points
+    if (currentStreak >= 7) meteoraPoints += 100
+    if (currentStreak >= 30) meteoraPoints += 300
+    
     setStreak(currentStreak)
     
-    // Update protocols with calculated points
+    // Update protocols with calculated points and activity status
     const updatedProtocols = PROTOCOL_CONFIGS.map(config => {
       let points = 0
       let protocolStreak = 0
@@ -232,18 +300,45 @@ export default function AirdropQuest({ userId, walletAddress, transactions }: Ai
         points = meteoraPoints
         protocolStreak = currentStreak
       }
-      // Other protocols would be calculated similarly when we track them
+      
+      // Update activities completion status based on actual activity
+      const updatedActivities = config.activities.map(activity => {
+        let completed = false
+        let completedToday = false
+        
+        if (config.id === 'meteora') {
+          switch (activity.id) {
+            case 'meteora-lp':
+              completed = status.hasActivePosition
+              completedToday = status.hasActivePosition
+              break
+            case 'meteora-fees':
+              completed = fees.length > 0
+              completedToday = status.claimedFeesToday
+              break
+            case 'meteora-rebalance':
+              completed = status.rebalancedThisWeek
+              completedToday = status.openedPositionToday && closes.some(tx => isToday(tx.block_time))
+              break
+            case 'meteora-new-pool':
+              completed = opens.length > 0
+              completedToday = status.openedPositionToday
+              break
+            case 'meteora-duration':
+              completed = currentStreak >= 30
+              break
+          }
+        }
+        
+        return { ...activity, completed, completedToday }
+      })
       
       return {
         ...config,
         currentPoints: points,
         streak: protocolStreak,
         lastActivityDate: sortedDates[0] || null,
-        activities: config.activities.map(activity => ({
-          ...activity,
-          completed: false, // Would be calculated based on actual data
-          completedToday: false,
-        }))
+        activities: updatedActivities
       }
     })
     
@@ -251,8 +346,8 @@ export default function AirdropQuest({ userId, walletAddress, transactions }: Ai
     setTotalPoints(updatedProtocols.reduce((sum, p) => sum + p.currentPoints, 0))
     setLevel(Math.floor(updatedProtocols.reduce((sum, p) => sum + p.currentPoints, 0) / 500) + 1)
     
-    // Generate daily tasks
-    setDailyTasks(generateDailyTasks(updatedProtocols))
+    // Generate daily tasks with auto-detection
+    setDailyTasks(generateDailyTasks(status))
   }
 
   const getProgressColor = (protocol: ProtocolTarget) => {
@@ -352,36 +447,76 @@ export default function AirdropQuest({ userId, walletAddress, transactions }: Ai
           {dailyTasks.map((task, idx) => (
             <div
               key={idx}
-              className={`flex items-center justify-between p-3 rounded-xl border transition-all ${
+              className={`flex items-center justify-between p-4 rounded-xl border transition-all ${
                 task.completed
-                  ? 'bg-emerald-500/10 border-emerald-500/30'
+                  ? 'bg-gradient-to-r from-emerald-500/20 to-emerald-500/10 border-emerald-500/40 shadow-lg shadow-emerald-500/10'
                   : 'bg-slate-800/50 border-slate-700/50 hover:border-slate-600/50'
               }`}
             >
               <div className="flex items-center gap-3">
-                <span className="text-2xl">{task.icon}</span>
+                <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
+                  task.completed ? 'bg-emerald-500/30' : 'bg-slate-700/50'
+                }`}>
+                  <span className="text-xl">{task.icon}</span>
+                </div>
                 <div>
                   <p className={`font-medium ${task.completed ? 'text-emerald-400' : 'text-white'}`}>
                     {task.task}
+                    {task.completed && <span className="ml-2 text-xs">✨ Completed!</span>}
                   </p>
                   <p className="text-slate-500 text-xs">{task.protocol}</p>
                 </div>
               </div>
               <div className="flex items-center gap-3">
-                <span className="text-cyan-400 font-semibold">+{task.points} pts</span>
-                <button
-                  className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all ${
+                <span className={`font-semibold ${task.completed ? 'text-emerald-400' : 'text-cyan-400'}`}>
+                  {task.completed ? '✓ ' : '+'}{task.points} pts
+                </span>
+                <div
+                  className={`w-8 h-8 rounded-full flex items-center justify-center transition-all ${
                     task.completed
-                      ? 'bg-emerald-500 border-emerald-500 text-white'
-                      : 'border-slate-600 hover:border-cyan-500'
+                      ? 'bg-gradient-to-r from-emerald-500 to-emerald-400 text-white shadow-lg shadow-emerald-500/30'
+                      : 'border-2 border-slate-600 hover:border-cyan-500'
                   }`}
                 >
-                  {task.completed && '✓'}
-                </button>
+                  {task.completed ? (
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                    </svg>
+                  ) : (
+                    <span className="w-3 h-3 rounded-full bg-slate-600"></span>
+                  )}
+                </div>
               </div>
             </div>
           ))}
         </div>
+        
+        {/* Daily Summary */}
+        {dailyTasks.length > 0 && (
+          <div className="mt-4 p-3 bg-slate-900/50 rounded-xl border border-slate-700/50">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="text-lg">📊</span>
+                <span className="text-slate-400 text-sm">Today&apos;s Progress</span>
+              </div>
+              <div className="flex items-center gap-4">
+                <span className="text-white font-semibold">
+                  {dailyTasks.filter(t => t.completed).length}/{dailyTasks.length} tasks
+                </span>
+                <span className="text-emerald-400 font-semibold">
+                  +{dailyTasks.filter(t => t.completed).reduce((sum, t) => sum + t.points, 0)} pts earned
+                </span>
+              </div>
+            </div>
+            {/* Progress bar */}
+            <div className="mt-2 w-full bg-slate-700/50 rounded-full h-2">
+              <div
+                className="h-2 rounded-full bg-gradient-to-r from-emerald-500 to-cyan-500 transition-all duration-500"
+                style={{ width: `${(dailyTasks.filter(t => t.completed).length / dailyTasks.length) * 100}%` }}
+              />
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Protocol Progress */}
