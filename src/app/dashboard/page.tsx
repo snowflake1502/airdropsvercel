@@ -44,6 +44,8 @@ export default function HomePage() {
   const [solPriceUSD, setSolPriceUSD] = useState(190)
   const [recentActivity, setRecentActivity] = useState<RecentActivity[]>([])
   const [loadingStats, setLoadingStats] = useState(false)
+  const [syncing, setSyncing] = useState(false)
+  const [syncStatus, setSyncStatus] = useState('')
   const router = useRouter()
   const { publicKey, connected } = useWallet()
   const { connection } = useConnection()
@@ -80,6 +82,50 @@ export default function HomePage() {
       }
     } catch (error) {
       console.warn('Failed to fetch SOL price, using fallback')
+    }
+  }
+
+  const syncWallet = async () => {
+    if (!publicKey || !user) return
+    setSyncing(true)
+    setSyncStatus('Scanning for new Meteora transactions...')
+
+    try {
+      const response = await fetch('/api/wallet/sync-meteora', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          walletAddress: publicKey.toBase58(),
+          limit: 30,
+          delayMs: 300
+        }),
+      })
+
+      const responseText = await response.text()
+      let data
+      try {
+        data = JSON.parse(responseText)
+      } catch {
+        throw new Error('Invalid response from server')
+      }
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Sync failed')
+      }
+
+      setSyncStatus(`✅ Found ${data.meteoraTransactions || 0} transactions`)
+      
+      // Reload all data
+      await fetchPortfolioStats()
+      if (user) await loadRecentActivity(user.id)
+      
+      setTimeout(() => setSyncStatus(''), 3000)
+    } catch (error: any) {
+      console.error('Sync error:', error)
+      setSyncStatus(`❌ Error: ${error.message}`)
+      setTimeout(() => setSyncStatus(''), 5000)
+    } finally {
+      setSyncing(false)
     }
   }
 
@@ -216,18 +262,49 @@ export default function HomePage() {
             </p>
           </div>
           {connected && (
-            <button
-              onClick={fetchPortfolioStats}
-              disabled={loadingStats}
-              className="px-4 py-2 bg-slate-800/50 hover:bg-slate-700/50 text-slate-300 rounded-xl text-sm font-medium transition-all flex items-center gap-2 border border-slate-700/50"
-            >
-              <svg className={`w-4 h-4 ${loadingStats ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-              </svg>
-              Refresh
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={syncWallet}
+                disabled={syncing || loadingStats}
+                className="px-4 py-2 bg-gradient-to-r from-cyan-500 to-violet-500 text-white rounded-xl text-sm font-semibold transition-all flex items-center gap-2 hover:opacity-90 disabled:opacity-50"
+              >
+                {syncing ? (
+                  <>
+                    <svg className="w-4 h-4 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                    Syncing...
+                  </>
+                ) : (
+                  <>🔄 Sync Wallet</>
+                )}
+              </button>
+              <button
+                onClick={fetchPortfolioStats}
+                disabled={loadingStats || syncing}
+                className="px-4 py-2 bg-slate-800/50 hover:bg-slate-700/50 text-slate-300 rounded-xl text-sm font-medium transition-all flex items-center gap-2 border border-slate-700/50 disabled:opacity-50"
+              >
+                <svg className={`w-4 h-4 ${loadingStats ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+                Refresh
+              </button>
+            </div>
           )}
         </div>
+
+        {/* Sync Status */}
+        {syncStatus && (
+          <div className={`p-4 rounded-xl border ${
+            syncStatus.includes('❌') 
+              ? 'bg-red-500/10 border-red-500/20 text-red-400' 
+              : syncStatus.includes('✅')
+              ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
+              : 'bg-cyan-500/10 border-cyan-500/20 text-cyan-400'
+          }`}>
+            {syncStatus}
+          </div>
+        )}
 
         {/* Portfolio Overview Card */}
         {connected && publicKey ? (
