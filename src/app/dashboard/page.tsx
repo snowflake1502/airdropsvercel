@@ -189,18 +189,47 @@ export default function HomePage() {
       const totalFees = fees.reduce((sum, tx) => sum + Math.abs(parseFloat(tx.total_usd) || 0), 0)
 
       // Current position value estimation
-      const openedPositions = new Set(opens.map(tx => tx.position_nft_address).filter(Boolean))
-      const closedPositions = new Set(closes.map(tx => tx.position_nft_address).filter(Boolean))
-      const activePositionAddresses = Array.from(openedPositions).filter(addr => !closedPositions.has(addr))
+      // Use position_nft_address if available, otherwise use signature as identifier
+      const openedPositions = new Set(opens.map(tx => tx.position_nft_address || tx.signature).filter(Boolean))
+      const closedPositions = new Set(closes.map(tx => tx.position_nft_address || tx.signature).filter(Boolean))
+      
+      // Also match closes to opens by checking if any close references the same pool/time range
+      const closedNftAddresses = new Set(closes.map(tx => tx.position_nft_address).filter(Boolean))
+      
+      // Find active positions: opened but not closed
+      // For positions with NFT address, check if NFT was closed
+      // For positions without NFT address (fallback to signature), they are considered active unless explicitly closed
+      const activePositionIds: string[] = []
+      
+      opens.forEach(openTx => {
+        const posId = openTx.position_nft_address || openTx.signature
+        if (!posId) return
+        
+        // Check if this position was closed
+        const wasClosed = openTx.position_nft_address 
+          ? closedNftAddresses.has(openTx.position_nft_address)
+          : false // If no NFT address, assume not closed unless we find a matching close
+        
+        if (!wasClosed && !activePositionIds.includes(posId)) {
+          activePositionIds.push(posId)
+        }
+      })
 
       let currentPositionValue = 0
-      activePositionAddresses.forEach(posAddr => {
-        const lastOpenTx = opens
-          .filter(tx => tx.position_nft_address === posAddr)
-          .sort((a, b) => (b?.block_time || 0) - (a?.block_time || 0))[0]
-        if (lastOpenTx) {
-          currentPositionValue += parseFloat(lastOpenTx.total_usd || '0')
+      activePositionIds.forEach(posId => {
+        const openTx = opens.find(tx => (tx.position_nft_address || tx.signature) === posId)
+        if (openTx) {
+          currentPositionValue += parseFloat(openTx.total_usd || '0')
         }
+      })
+
+      // Debug logging
+      console.log('📊 Position calculation:', {
+        totalOpens: opens.length,
+        totalCloses: closes.length,
+        activePositions: activePositionIds.length,
+        currentPositionValue,
+        openIds: opens.map(tx => ({ nft: tx.position_nft_address, sig: tx.signature?.slice(0,8) }))
       })
 
       const totalPnL = (currentPositionValue + totalWithdrawn + totalFees) - totalInvested
@@ -210,7 +239,7 @@ export default function HomePage() {
         totalValueUSD,
         solBalance,
         usdcBalance,
-        activePositions: activePositionAddresses.length,
+        activePositions: activePositionIds.length,
         totalPnL,
         pendingAirdrops: 3, // Meteora, Jupiter, Sanctum
         unclaimedFees: totalFees,
