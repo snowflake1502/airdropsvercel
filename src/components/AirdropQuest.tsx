@@ -10,6 +10,7 @@ import {
   getWeeklySummary,
   TaskCompletion 
 } from '@/lib/task-storage'
+import { quickCheckJupiterSwaps, checkSanctumLST } from '@/lib/jupiter-api'
 
 interface ProtocolTarget {
   id: string
@@ -121,6 +122,7 @@ const isThisWeek = (timestamp: number) => {
 }
 
 interface ActivityStatus {
+  // Meteora
   hasActivePosition: boolean
   claimedFeesToday: boolean
   claimedFeesThisWeek: boolean
@@ -129,10 +131,16 @@ interface ActivityStatus {
   rebalancedThisWeek: boolean
   totalTransactionsToday: number
   totalTransactionsThisWeek: number
+  // Jupiter
+  hasJupiterSwapToday: boolean
+  hasJupiterLimitOrderToday: boolean
+  hasJupiterPerpsToday: boolean
+  // Sanctum
+  hasSanctumLST: boolean
 }
 
-// Analyze transactions to determine activity status
-const analyzeActivity = (transactions: any[]): ActivityStatus => {
+// Analyze transactions to determine activity status (Meteora only)
+const analyzeMeteoraActivity = (transactions: any[]): Omit<ActivityStatus, 'hasJupiterSwapToday' | 'hasJupiterLimitOrderToday' | 'hasJupiterPerpsToday' | 'hasSanctumLST'> => {
   const opens = transactions.filter(tx => tx.tx_type === 'position_open')
   const closes = transactions.filter(tx => tx.tx_type === 'position_close')
   const fees = transactions.filter(tx => tx.tx_type === 'fee_claim')
@@ -259,45 +267,45 @@ const generateDailyTasks = (activityStatus: ActivityStatus): DailyTask[] => {
   }
   
   // === JUPITER TASKS ===
-  // Jupiter swap - every day (easy points)
+  // Jupiter swap - every day (easy points) - AUTO-DETECTED
   const jupSwap = TASK_DEFINITIONS['jupiter-swap']
   tasks.push({
     id: 'jupiter-swap',
     ...jupSwap,
-    completed: false,
-    autoDetected: false,
+    completed: activityStatus.hasJupiterSwapToday,
+    autoDetected: activityStatus.hasJupiterSwapToday,
   })
   
-  // Jupiter limit order - Mon, Wed, Fri
+  // Jupiter limit order - Mon, Wed, Fri - AUTO-DETECTED
   if (dayOfWeek === 1 || dayOfWeek === 3 || dayOfWeek === 5) {
     const jupLimit = TASK_DEFINITIONS['jupiter-limit']
     tasks.push({
       id: 'jupiter-limit',
       ...jupLimit,
-      completed: false,
-      autoDetected: false,
+      completed: activityStatus.hasJupiterLimitOrderToday,
+      autoDetected: activityStatus.hasJupiterLimitOrderToday,
     })
   }
   
-  // Jupiter perps - Tue, Thu, Sat (for higher risk tolerance days)
+  // Jupiter perps - Tue, Thu, Sat - AUTO-DETECTED
   if (dayOfWeek === 2 || dayOfWeek === 4 || dayOfWeek === 6) {
     const jupPerp = TASK_DEFINITIONS['jupiter-perp']
     tasks.push({
       id: 'jupiter-perp',
       ...jupPerp,
-      completed: false,
-      autoDetected: false,
+      completed: activityStatus.hasJupiterPerpsToday,
+      autoDetected: activityStatus.hasJupiterPerpsToday,
     })
   }
   
   // === SANCTUM TASKS ===
-  // Sanctum LST - every day (passive holding)
+  // Sanctum LST - every day (passive holding) - AUTO-DETECTED
   const sanctumLst = TASK_DEFINITIONS['sanctum-lst']
   tasks.push({
     id: 'sanctum-lst',
     ...sanctumLst,
-    completed: false,
-    autoDetected: false,
+    completed: activityStatus.hasSanctumLST,
+    autoDetected: activityStatus.hasSanctumLST,
   })
   
   // === WEEKLY TASKS ===
@@ -344,37 +352,187 @@ export default function AirdropQuest({ userId, walletAddress, transactions }: Ai
   const [showPending, setShowPending] = useState(false)
   const [savingTask, setSavingTask] = useState<string | null>(null)
   const [hoveredTask, setHoveredTask] = useState<string | null>(null)
+  const [savedTasksMap, setSavedTasksMap] = useState<Map<string, boolean>>(new Map())
+  const [isLoadingActivity, setIsLoadingActivity] = useState(false)
 
   const today = new Date().toISOString().split('T')[0]
 
-  useEffect(() => {
-    calculatePoints()
-  }, [transactions])
-
+  // Load saved tasks FIRST before generating tasks
   useEffect(() => {
     if (userId && walletAddress) {
-      loadSavedTasks()
+      loadSavedTasksFirst()
+    }
+  }, [userId, walletAddress])
+
+  // Then calculate points and generate tasks
+  useEffect(() => {
+    if (walletAddress) {
+      calculatePointsWithMultiProtocol()
+    }
+  }, [transactions, walletAddress, savedTasksMap])
+
+  // Load pending tasks
+  useEffect(() => {
+    if (userId && walletAddress) {
       loadPendingTasks()
     }
-  }, [userId, walletAddress, dailyTasks.length])
+  }, [userId, walletAddress])
 
-  // Load saved task completions for today
-  const loadSavedTasks = async () => {
+  // Load saved task completions BEFORE generating tasks
+  const loadSavedTasksFirst = async () => {
     if (!userId || !walletAddress) return
     
     try {
       const savedTasks = await getTasksForDate(userId, walletAddress, today)
-      if (savedTasks.length > 0) {
-        setDailyTasks(prev => prev.map(task => {
-          const saved = savedTasks.find(s => s.task_id === task.id)
-          if (saved && saved.completed && !task.autoDetected) {
-            return { ...task, completed: true, autoDetected: false }
-          }
-          return task
-        }))
-      }
+      const taskMap = new Map<string, boolean>()
+      savedTasks.forEach(task => {
+        if (task.completed) {
+          taskMap.set(task.task_id, true)
+        }
+      })
+      setSavedTasksMap(taskMap)
+      console.log('📋 Loaded saved tasks:', Array.from(taskMap.keys()))
     } catch (error) {
       console.error('Error loading saved tasks:', error)
+    }
+  }
+
+  // Calculate points with multi-protocol detection
+  const calculatePointsWithMultiProtocol = async () => {
+    setIsLoadingActivity(true)
+    
+    try {
+      // Analyze Meteora activity from transactions
+      const meteoraStatus = analyzeMeteoraActivity(transactions)
+      
+      // Check Jupiter and Sanctum activity (in parallel)
+      let jupiterStatus = { hasSwapToday: false, hasLimitOrderToday: false, hasPerpsToday: false }
+      let hasSanctumLST = false
+      
+      if (walletAddress) {
+        try {
+          const [jupResult, sanctumResult] = await Promise.all([
+            quickCheckJupiterSwaps(walletAddress),
+            checkSanctumLST(walletAddress)
+          ])
+          jupiterStatus = jupResult
+          hasSanctumLST = sanctumResult
+          console.log('🪐 Jupiter activity:', jupiterStatus)
+          console.log('⭐ Sanctum LST:', hasSanctumLST)
+        } catch (err) {
+          console.warn('Could not check multi-protocol activity:', err)
+        }
+      }
+      
+      // Combine all activity status
+      const fullStatus: ActivityStatus = {
+        ...meteoraStatus,
+        hasJupiterSwapToday: jupiterStatus.hasSwapToday,
+        hasJupiterLimitOrderToday: jupiterStatus.hasLimitOrderToday,
+        hasJupiterPerpsToday: jupiterStatus.hasPerpsToday,
+        hasSanctumLST,
+      }
+      
+      setActivityStatus(fullStatus)
+      
+      // Generate tasks with auto-detection AND preserved manual completions
+      const generatedTasks = generateDailyTasks(fullStatus)
+      
+      // Merge with saved task completions (preserve manual completions)
+      const mergedTasks = generatedTasks.map(task => {
+        const wasManuallySaved = savedTasksMap.get(task.id)
+        if (wasManuallySaved && !task.autoDetected) {
+          return { ...task, completed: true, autoDetected: false }
+        }
+        return task
+      })
+      
+      setDailyTasks(mergedTasks)
+      
+      // Calculate Meteora points
+      const opens = transactions.filter(tx => tx.tx_type === 'position_open')
+      const fees = transactions.filter(tx => tx.tx_type === 'fee_claim')
+      const uniqueDays = new Set(transactions.map(tx => 
+        new Date(tx.block_time * 1000).toDateString()
+      ))
+      
+      let meteoraPoints = opens.length * 50 + fees.length * 25 + uniqueDays.size * 10
+      if (fullStatus.hasActivePosition) meteoraPoints += 100
+      
+      // Calculate streak
+      let currentStreak = 0
+      const sortedDates = Array.from(uniqueDays).sort().reverse()
+      for (let i = 0; i < sortedDates.length; i++) {
+        const date = new Date(sortedDates[i])
+        const expectedDate = new Date()
+        expectedDate.setDate(expectedDate.getDate() - i)
+        if (date.toDateString() === expectedDate.toDateString()) {
+          currentStreak++
+        } else {
+          break
+        }
+      }
+      if (currentStreak >= 7) meteoraPoints += 100
+      if (currentStreak >= 30) meteoraPoints += 300
+      setStreak(currentStreak)
+      
+      // Update protocols
+      const updatedProtocols = PROTOCOL_CONFIGS.map(config => {
+        let points = 0
+        let protocolStreak = 0
+        
+        if (config.id === 'meteora') {
+          points = meteoraPoints
+          protocolStreak = currentStreak
+        }
+        
+        const updatedActivities = config.activities.map(activity => {
+          let completed = false
+          let completedToday = false
+          
+          if (config.id === 'meteora') {
+            switch (activity.id) {
+              case 'meteora-lp':
+                completed = fullStatus.hasActivePosition
+                completedToday = fullStatus.hasActivePosition
+                break
+              case 'meteora-fees':
+                completed = fees.length > 0
+                completedToday = fullStatus.claimedFeesToday
+                break
+              case 'meteora-rebalance':
+                completed = fullStatus.rebalancedThisWeek
+                break
+              case 'meteora-new-pool':
+                completed = opens.length > 0
+                completedToday = fullStatus.openedPositionToday
+                break
+              case 'meteora-duration':
+                completed = currentStreak >= 30
+                break
+            }
+          }
+          
+          return { ...activity, completed, completedToday }
+        })
+        
+        return {
+          ...config,
+          currentPoints: points,
+          streak: protocolStreak,
+          lastActivityDate: sortedDates[0] || null,
+          activities: updatedActivities
+        }
+      })
+      
+      setProtocols(updatedProtocols)
+      setTotalPoints(updatedProtocols.reduce((sum, p) => sum + p.currentPoints, 0))
+      setLevel(Math.floor(updatedProtocols.reduce((sum, p) => sum + p.currentPoints, 0) / 500) + 1)
+      
+    } catch (error) {
+      console.error('Error calculating points:', error)
+    } finally {
+      setIsLoadingActivity(false)
     }
   }
 
@@ -408,9 +566,21 @@ export default function AirdropQuest({ userId, walletAddress, transactions }: Ai
         task.points
       )
       
+      // Update local state immediately
       setDailyTasks(prev => prev.map(t => 
         t.id === task.id ? { ...t, completed: newStatus, autoDetected: false } : t
       ))
+      
+      // Also update the saved tasks map to persist across re-renders
+      setSavedTasksMap(prev => {
+        const newMap = new Map(prev)
+        if (newStatus) {
+          newMap.set(task.id, true)
+        } else {
+          newMap.delete(task.id)
+        }
+        return newMap
+      })
     } catch (error) {
       console.error('Error toggling task:', error)
     } finally {
@@ -436,117 +606,6 @@ export default function AirdropQuest({ userId, walletAddress, transactions }: Ai
     } catch (error) {
       console.error('Error completing pending task:', error)
     }
-  }
-
-  const calculatePoints = () => {
-    // Analyze activity status from transactions
-    const status = analyzeActivity(transactions)
-    setActivityStatus(status)
-    
-    // Calculate points based on transaction history
-    const opens = transactions.filter(tx => tx.tx_type === 'position_open')
-    const closes = transactions.filter(tx => tx.tx_type === 'position_close')
-    const fees = transactions.filter(tx => tx.tx_type === 'fee_claim')
-    
-    // Calculate Meteora points
-    let meteoraPoints = 0
-    
-    // Points for each position opened
-    meteoraPoints += opens.length * 50
-    
-    // Points for fee claims
-    meteoraPoints += fees.length * 25
-    
-    // Points for active days (unique days with transactions)
-    const uniqueDays = new Set(transactions.map(tx => 
-      new Date(tx.block_time * 1000).toDateString()
-    ))
-    meteoraPoints += uniqueDays.size * 10
-    
-    // Bonus for maintaining positions
-    if (status.hasActivePosition) {
-      meteoraPoints += 100 // Active position bonus
-    }
-    
-    // Bonus for streaks
-    let currentStreak = 0
-    const sortedDates = Array.from(uniqueDays).sort().reverse()
-    
-    for (let i = 0; i < sortedDates.length; i++) {
-      const date = new Date(sortedDates[i])
-      const expectedDate = new Date()
-      expectedDate.setDate(expectedDate.getDate() - i)
-      
-      if (date.toDateString() === expectedDate.toDateString()) {
-        currentStreak++
-      } else {
-        break
-      }
-    }
-    
-    // Streak bonus points
-    if (currentStreak >= 7) meteoraPoints += 100
-    if (currentStreak >= 30) meteoraPoints += 300
-    
-    setStreak(currentStreak)
-    
-    // Update protocols with calculated points and activity status
-    const updatedProtocols = PROTOCOL_CONFIGS.map(config => {
-      let points = 0
-      let protocolStreak = 0
-      
-      if (config.id === 'meteora') {
-        points = meteoraPoints
-        protocolStreak = currentStreak
-      }
-      
-      // Update activities completion status based on actual activity
-      const updatedActivities = config.activities.map(activity => {
-        let completed = false
-        let completedToday = false
-        
-        if (config.id === 'meteora') {
-          switch (activity.id) {
-            case 'meteora-lp':
-              completed = status.hasActivePosition
-              completedToday = status.hasActivePosition
-              break
-            case 'meteora-fees':
-              completed = fees.length > 0
-              completedToday = status.claimedFeesToday
-              break
-            case 'meteora-rebalance':
-              completed = status.rebalancedThisWeek
-              completedToday = status.openedPositionToday && closes.some(tx => isToday(tx.block_time))
-              break
-            case 'meteora-new-pool':
-              completed = opens.length > 0
-              completedToday = status.openedPositionToday
-              break
-            case 'meteora-duration':
-              completed = currentStreak >= 30
-              break
-          }
-        }
-        
-        return { ...activity, completed, completedToday }
-      })
-      
-      return {
-        ...config,
-        currentPoints: points,
-        streak: protocolStreak,
-        lastActivityDate: sortedDates[0] || null,
-        activities: updatedActivities
-      }
-    })
-    
-    setProtocols(updatedProtocols)
-    setTotalPoints(updatedProtocols.reduce((sum, p) => sum + p.currentPoints, 0))
-    setLevel(Math.floor(updatedProtocols.reduce((sum, p) => sum + p.currentPoints, 0) / 500) + 1)
-    
-    // Generate daily tasks with auto-detection
-    setDailyTasks(generateDailyTasks(status))
   }
 
   const getProgressColor = (protocol: ProtocolTarget) => {
