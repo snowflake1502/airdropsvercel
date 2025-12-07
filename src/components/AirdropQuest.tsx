@@ -8,6 +8,7 @@ import {
   saveTaskCompletion,
   getPendingTasks,
   getWeeklySummary,
+  getTaskHistory,
   TaskCompletion 
 } from '@/lib/task-storage'
 import { quickCheckJupiterSwaps, checkSanctumLST } from '@/lib/jupiter-api'
@@ -335,6 +336,10 @@ export default function AirdropQuest({ userId, walletAddress, transactions }: Ai
   const [hoveredTask, setHoveredTask] = useState<string | null>(null)
   const [savedTasksMap, setSavedTasksMap] = useState<Map<string, boolean>>(new Map())
   const [isLoadingActivity, setIsLoadingActivity] = useState(false)
+  const [showHistory, setShowHistory] = useState(false)
+  const [taskHistory, setTaskHistory] = useState<TaskCompletion[]>([])
+  const [historyLoading, setHistoryLoading] = useState(false)
+  const [weeklySummary, setWeeklySummary] = useState<{ date: string; completed: number; total: number; points: number }[]>([])
 
   const today = new Date().toISOString().split('T')[0]
 
@@ -663,6 +668,38 @@ export default function AirdropQuest({ userId, walletAddress, transactions }: Ai
     }
   }
 
+  // Load task history (last 30 days)
+  const loadTaskHistory = async () => {
+    if (!userId || !walletAddress) return
+    setHistoryLoading(true)
+    
+    try {
+      const endDate = new Date().toISOString().split('T')[0]
+      const startDate = new Date()
+      startDate.setDate(startDate.getDate() - 30)
+      
+      const [history, summary] = await Promise.all([
+        getTaskHistory(userId, walletAddress, startDate.toISOString().split('T')[0], endDate),
+        getWeeklySummary(userId, walletAddress)
+      ])
+      
+      setTaskHistory(history)
+      setWeeklySummary(summary)
+    } catch (error) {
+      console.error('Error loading task history:', error)
+    } finally {
+      setHistoryLoading(false)
+    }
+  }
+
+  // Toggle history view
+  const toggleHistoryView = () => {
+    if (!showHistory) {
+      loadTaskHistory()
+    }
+    setShowHistory(!showHistory)
+  }
+
   const getProgressColor = (protocol: ProtocolTarget) => {
     const percent = (protocol.currentPoints / protocol.totalPointsRequired) * 100
     if (percent >= 100) return 'from-emerald-500 to-emerald-400'
@@ -957,6 +994,133 @@ export default function AirdropQuest({ userId, walletAddress, transactions }: Ai
             )}
           </div>
         )}
+
+        {/* View Task History Button */}
+        <div className="mt-4">
+          <button
+            onClick={toggleHistoryView}
+            className="w-full flex items-center justify-center gap-2 p-3 bg-slate-700/30 rounded-xl border border-slate-600/30 hover:bg-slate-700/50 transition-all text-slate-300 hover:text-white"
+          >
+            <span>📅</span>
+            <span className="font-medium">{showHistory ? 'Hide' : 'View'} Task History</span>
+            <svg
+              className={`w-4 h-4 transition-transform ${showHistory ? 'rotate-180' : ''}`}
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+
+          {/* Task History Panel */}
+          {showHistory && (
+            <div className="mt-3 bg-slate-800/50 rounded-xl border border-slate-700/50 p-4">
+              {historyLoading ? (
+                <div className="flex items-center justify-center py-8">
+                  <div className="animate-spin rounded-full h-8 w-8 border-2 border-cyan-500 border-t-transparent"></div>
+                </div>
+              ) : (
+                <>
+                  {/* Weekly Summary */}
+                  {weeklySummary.length > 0 && (
+                    <div className="mb-4">
+                      <h4 className="text-sm font-medium text-slate-300 mb-3">📊 Last 7 Days</h4>
+                      <div className="grid grid-cols-7 gap-1">
+                        {Array.from({ length: 7 }).map((_, i) => {
+                          const date = new Date()
+                          date.setDate(date.getDate() - (6 - i))
+                          const dateStr = date.toISOString().split('T')[0]
+                          const dayData = weeklySummary.find(d => d.date === dateStr)
+                          const hasActivity = dayData && dayData.completed > 0
+                          const isToday = i === 6
+                          
+                          return (
+                            <div 
+                              key={dateStr}
+                              className={`p-2 rounded-lg text-center ${
+                                hasActivity 
+                                  ? 'bg-emerald-500/20 border border-emerald-500/30' 
+                                  : 'bg-slate-700/30 border border-slate-700/50'
+                              } ${isToday ? 'ring-2 ring-cyan-500/50' : ''}`}
+                            >
+                              <p className="text-xs text-slate-500">{date.toLocaleDateString('en-US', { weekday: 'short' })}</p>
+                              <p className={`text-sm font-bold ${hasActivity ? 'text-emerald-400' : 'text-slate-600'}`}>
+                                {dayData?.completed || 0}
+                              </p>
+                              {hasActivity && (
+                                <p className="text-xs text-emerald-400">+{dayData?.points}</p>
+                              )}
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Task History List */}
+                  <h4 className="text-sm font-medium text-slate-300 mb-3">📜 Recent Tasks</h4>
+                  {taskHistory.length > 0 ? (
+                    <div className="space-y-2 max-h-64 overflow-y-auto">
+                      {/* Group by date */}
+                      {Array.from(new Set(taskHistory.map(t => t.task_date))).slice(0, 7).map(date => {
+                        const tasksForDate = taskHistory.filter(t => t.task_date === date)
+                        const completedCount = tasksForDate.filter(t => t.completed).length
+                        const totalPoints = tasksForDate.filter(t => t.completed).reduce((sum, t) => sum + t.points, 0)
+                        
+                        return (
+                          <div key={date} className="bg-slate-900/50 rounded-lg p-3">
+                            <div className="flex items-center justify-between mb-2">
+                              <p className="text-sm font-medium text-white">
+                                {new Date(date + 'T12:00:00').toLocaleDateString('en-US', { 
+                                  weekday: 'long', 
+                                  month: 'short', 
+                                  day: 'numeric' 
+                                })}
+                              </p>
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs text-slate-400">{completedCount}/{tasksForDate.length} tasks</span>
+                                {totalPoints > 0 && (
+                                  <span className="text-xs text-emerald-400 bg-emerald-500/20 px-2 py-0.5 rounded-full">
+                                    +{totalPoints} pts
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                            <div className="flex flex-wrap gap-1">
+                              {tasksForDate.map(task => (
+                                <span
+                                  key={task.task_id}
+                                  className={`px-2 py-0.5 text-xs rounded-full ${
+                                    task.completed 
+                                      ? 'bg-emerald-500/20 text-emerald-400' 
+                                      : 'bg-slate-700/50 text-slate-500'
+                                  }`}
+                                  title={task.task_name}
+                                >
+                                  {task.protocol === 'Meteora' ? '🌊' : 
+                                   task.protocol === 'Jupiter' ? '🪐' : 
+                                   task.protocol === 'Sanctum' ? '⭐' : '📋'} 
+                                  {task.completed ? '✓' : '○'}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  ) : (
+                    <div className="text-center py-6">
+                      <span className="text-3xl">📭</span>
+                      <p className="text-slate-400 text-sm mt-2">No task history yet</p>
+                      <p className="text-slate-500 text-xs">Complete today's tasks to start tracking!</p>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Protocol Progress */}
