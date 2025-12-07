@@ -9,6 +9,7 @@ import { useWallet, useConnection } from '@solana/wallet-adapter-react'
 import { PublicKey, ParsedAccountData } from '@solana/web3.js'
 import Link from 'next/link'
 import AirdropQuest from '@/components/AirdropQuest'
+import { checkSanctumLST } from '@/lib/jupiter-api'
 
 const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'
 
@@ -20,6 +21,11 @@ interface PortfolioStats {
   totalPnL: number
   pendingAirdrops: number
   unclaimedFees: number
+  positionsByProtocol: {
+    meteora: number
+    sanctum: number
+    jupiter: number
+  }
 }
 
 interface RecentActivity {
@@ -41,6 +47,7 @@ export default function HomePage() {
     totalPnL: 0,
     pendingAirdrops: 3,
     unclaimedFees: 0,
+    positionsByProtocol: { meteora: 0, sanctum: 0, jupiter: 0 }
   })
   const [solPriceUSD, setSolPriceUSD] = useState(190)
   const [recentActivity, setRecentActivity] = useState<RecentActivity[]>([])
@@ -228,6 +235,14 @@ export default function HomePage() {
       // This doesn't include unrealized gains/losses from active positions
       const realizedPnL = (totalWithdrawn + totalFees) - totalInvested
 
+      // Check for Sanctum LST holdings
+      let hasSanctumPosition = false
+      try {
+        hasSanctumPosition = await checkSanctumLST(walletAddress)
+      } catch (err) {
+        console.warn('Could not check Sanctum LST:', err)
+      }
+
       // Debug logging
       console.log('📊 Position calculation:', {
         totalOpens: opens.length,
@@ -238,20 +253,33 @@ export default function HomePage() {
         totalWithdrawn,
         totalFees,
         realizedPnL,
-        nftAddresses: Array.from(nftOpenCounts.keys()).map(k => k.slice(0,8))
+        nftAddresses: Array.from(nftOpenCounts.keys()).map(k => k.slice(0,8)),
+        hasSanctumPosition,
       })
 
       const totalPnL = realizedPnL
       const totalValueUSD = (solBalance * solPriceUSD) + usdcBalance
+      
+      // Calculate positions by protocol
+      const meteoraPositions = activePositionCount
+      const sanctumPositions = hasSanctumPosition ? 1 : 0
+      const jupiterPositions = 0 // Jupiter swaps aren't "positions" - would need limit orders/DCA
+      
+      const totalPositions = meteoraPositions + sanctumPositions + jupiterPositions
 
       setStats({
         totalValueUSD,
         solBalance,
         usdcBalance,
-        activePositions: activePositionCount,
+        activePositions: totalPositions,
         totalPnL,
         pendingAirdrops: 3, // Meteora, Jupiter, Sanctum
         unclaimedFees: totalFees,
+        positionsByProtocol: {
+          meteora: meteoraPositions,
+          sanctum: sanctumPositions,
+          jupiter: jupiterPositions,
+        }
       })
     } catch (error) {
       console.error('Error fetching portfolio stats:', error)
@@ -404,6 +432,24 @@ export default function HomePage() {
             </div>
             <p className="text-2xl font-bold text-white">{stats.activePositions}</p>
             <p className="text-slate-400 text-sm">Active Positions</p>
+            {/* Protocol breakdown */}
+            <div className="flex gap-2 mt-2 flex-wrap">
+              {stats.positionsByProtocol.meteora > 0 && (
+                <span className="text-xs px-2 py-0.5 bg-cyan-500/20 text-cyan-400 rounded-full">
+                  🌊 {stats.positionsByProtocol.meteora}
+                </span>
+              )}
+              {stats.positionsByProtocol.sanctum > 0 && (
+                <span className="text-xs px-2 py-0.5 bg-purple-500/20 text-purple-400 rounded-full">
+                  ⭐ {stats.positionsByProtocol.sanctum}
+                </span>
+              )}
+              {stats.positionsByProtocol.jupiter > 0 && (
+                <span className="text-xs px-2 py-0.5 bg-green-500/20 text-green-400 rounded-full">
+                  🪐 {stats.positionsByProtocol.jupiter}
+                </span>
+              )}
+            </div>
           </Link>
 
           <Link href="/dashboard/discover" className="bg-slate-800/30 hover:bg-slate-800/50 rounded-xl p-4 border border-slate-700/50 transition-all group">
