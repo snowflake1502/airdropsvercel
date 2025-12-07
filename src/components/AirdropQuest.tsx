@@ -56,7 +56,7 @@ const PROTOCOL_CONFIGS: Omit<ProtocolTarget, 'currentPoints' | 'streak' | 'lastA
     name: 'Meteora',
     icon: '🌊',
     color: 'cyan',
-    totalPointsRequired: 1000,
+    totalPointsRequired: 500, // Lowered - more achievable milestone
     airdropDate: 'Q1 2025',
     airdropPotential: 'confirmed',
     activities: [
@@ -72,7 +72,7 @@ const PROTOCOL_CONFIGS: Omit<ProtocolTarget, 'currentPoints' | 'streak' | 'lastA
     name: 'Jupiter',
     icon: '🪐',
     color: 'green',
-    totalPointsRequired: 800,
+    totalPointsRequired: 200, // Lowered - Jupiter has many users, activity matters more
     airdropDate: 'Q2 2025',
     airdropPotential: 'high',
     activities: [
@@ -88,7 +88,7 @@ const PROTOCOL_CONFIGS: Omit<ProtocolTarget, 'currentPoints' | 'streak' | 'lastA
     name: 'Sanctum',
     icon: '⭐',
     color: 'purple',
-    totalPointsRequired: 600,
+    totalPointsRequired: 300, // Lowered - LST holding should show progress quickly
     airdropDate: 'Q2-Q3 2025',
     airdropPotential: 'high',
     activities: [
@@ -440,21 +440,28 @@ export default function AirdropQuest({ userId, walletAddress, transactions }: Ai
       let meteoraPoints = opens.length * 50 + fees.length * 25 + uniqueDays.size * 10
       if (fullStatus.hasActivePosition) meteoraPoints += 100
       
-      // Calculate streak
-      let currentStreak = 0
+      // Calculate streak from Meteora transactions
+      let meteoraStreak = 0
       const sortedDates = Array.from(uniqueDays).sort().reverse()
       for (let i = 0; i < sortedDates.length; i++) {
         const date = new Date(sortedDates[i])
         const expectedDate = new Date()
         expectedDate.setDate(expectedDate.getDate() - i)
         if (date.toDateString() === expectedDate.toDateString()) {
-          currentStreak++
+          meteoraStreak++
         } else {
           break
         }
       }
-      if (currentStreak >= 7) meteoraPoints += 100
-      if (currentStreak >= 30) meteoraPoints += 300
+      if (meteoraStreak >= 7) meteoraPoints += 100
+      if (meteoraStreak >= 30) meteoraPoints += 300
+      
+      // Calculate overall streak (any protocol activity today counts)
+      // If user has ANY active position/holding today, count as a streak day
+      const hasActivityToday = fullStatus.hasActivePosition || 
+                               fullStatus.hasJupiterSwapToday || 
+                               fullStatus.hasSanctumLST
+      const currentStreak = hasActivityToday ? Math.max(1, meteoraStreak) : 0
       setStreak(currentStreak)
       
       // === CALCULATE JUPITER POINTS ===
@@ -711,8 +718,8 @@ export default function AirdropQuest({ userId, walletAddress, transactions }: Ai
             <p className="text-slate-400 text-xs">Day Streak</p>
           </div>
           <div className="bg-slate-800/50 rounded-xl p-3 text-center">
-            <p className="text-2xl font-bold text-emerald-400">{protocols.filter(p => p.currentPoints >= p.totalPointsRequired * 0.5).length}/{protocols.length}</p>
-            <p className="text-slate-400 text-xs">Protocols Ready</p>
+            <p className="text-2xl font-bold text-emerald-400">{protocols.filter(p => p.currentPoints >= p.totalPointsRequired * 0.25).length}/{protocols.length}</p>
+            <p className="text-slate-400 text-xs">Protocols Active</p>
           </div>
         </div>
       </div>
