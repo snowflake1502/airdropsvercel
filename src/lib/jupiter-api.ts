@@ -304,25 +304,51 @@ export async function quickCheckJupiterSwaps(walletAddress: string): Promise<{
                               allProgramIds.includes(JUPITER_V4) ||
                               allProgramIds.some((p: string) => p && p.startsWith('JUP'))
         
-        // Also check for Jupiter aggregator route programs
-        const JUPITER_ROUTE_PROGRAMS = [
+        // Also check for Jupiter aggregator route programs and other DEXs
+        const DEX_PROGRAMS = [
+          // Jupiter
           'JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4', // Jupiter v6
           'JUP4Fb2cqiRUcaTHdrPC8h2gNsA2ETXiPDD33WcGuJB', // Jupiter v4
           'JUP3c2Uh3WA4Ng34tw6kPd2G4C5BB21Xo36Je1s32Ph', // Jupiter v3
           'JUP2jxvXaqu7NQY1GmNF4m1vodw12LVXYxbFL2uJvfo', // Jupiter v2
-          'whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc', // Whirlpool (Orca) - often used by Jupiter
-          '675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8', // Raydium AMM - often used by Jupiter
+          
+          // Fluxbeam (user's swap program!)
+          'FLipGhpiRaFeQhJinrahTtEQjhMSyd68rBDcgSystmyt', // Fluxbeam
+          
+          // Raydium
+          '675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8', // Raydium AMM v4
           'CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK', // Raydium CLMM
+          '5quBtoiQqxF9Jv6KYKctB59NT3gtJD2Y65kdnB1Uev3h', // Raydium AMM
+          
+          // Orca
+          'whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc', // Orca Whirlpool
+          '9W959DqEETiGZocYWCQPaJ6sBmUzgfxXfqGeTEdp3aQP', // Orca v1
+          'DjVE6JNiYqPL2QXyCUUh8rNjHrbz9hXHNYt99MQ59qw1', // Orca v2
+          
+          // Meteora
           'LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo', // Meteora DLMM
-          'Eo7WjKq67rjJQSZxS6z3YkapzY3eMj6Xy8X5EQVn5UaB', // Phoenix
-          'srmqPvymJeFKQ4zGQed1GFppgkRHL9kaELCbyksJtPX', // Serum/OpenBook
+          'Eo7WjKq67rjJQSZxS6z3YkapzY3eMj6Xy8X5EQVn5UaB', // Meteora Dynamic AMM
+          
+          // Phoenix
+          'PhoeNiXZ8ByJGLkxNfZRnkUfjvmuYqLR89jjFHGqdXY', // Phoenix
+          
+          // OpenBook/Serum
+          'srmqPvymJeFKQ4zGQed1GFppgkRHL9kaELCbyksJtPX', // Serum v3
+          'opnb2LAfJYbRMAHHvqjCwQxanZn7ReEHp1k81EohpZb', // OpenBook v2
+          
+          // Sanctum (for LST swaps)
+          'stkitrT1Uoy18Dk1fTrgPw8W6MVzoCfYoAFT4MLsmhq', // Sanctum Router
+          '5ocnV1qiCgaQR8Jb8xWnVbApfaygJ8tNoZfgPwsgx9kx', // Sanctum Stake Pool
         ]
         
-        const usesJupiterRoute = allProgramIds.some((p: string) => JUPITER_ROUTE_PROGRAMS.includes(p))
-        if (isJupiterSwap || usesJupiterRoute) {
+        const usesKnownDex = allProgramIds.some((p: string) => DEX_PROGRAMS.includes(p))
+        
+        if (isJupiterSwap || usesKnownDex) {
           hasSwapToday = true
           totalSwapsDetected++
-          console.log('🪐 ✅ Found swap (Jupiter/DEX):', sig.signature.slice(0, 20) + '...')
+          // Find which DEX was used
+          const dexUsed = DEX_PROGRAMS.find((p: string) => allProgramIds.includes(p))
+          console.log('🪐 ✅ Found swap via:', dexUsed?.slice(0, 12) + '...', '- TX:', sig.signature.slice(0, 16) + '...')
         }
         
         // Check for limit orders
