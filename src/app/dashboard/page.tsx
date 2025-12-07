@@ -265,26 +265,32 @@ export default function HomePage() {
       }
 
       // Estimate Meteora LP position value from transaction history
-      // For active positions, estimate value based on deposits minus withdrawals
+      // For active positions: value = deposits - withdrawals per NFT
       let meteoraLPValueUSD = 0
       if (activePositionCount > 0) {
-        // Calculate the remaining value in active positions
-        // If you deposited $500 and withdrew $200, position value is ~$300
-        const depositsForActivePositions = opens
-          .filter(tx => {
-            // Check if this position is still active
-            const nft = tx.position_nft_address
-            if (!nft) return true // No NFT = active
-            const closedCount = nftCloseCounts.get(nft) || 0
-            const openedCount = nftOpenCounts.get(nft) || 0
-            return openedCount > closedCount
-          })
-          .reduce((sum, tx) => sum + Math.abs(parseFloat(tx.total_usd) || 0), 0)
-        
-        // Active position value = deposits that haven't been withdrawn
-        // This is an estimate - actual value depends on current pool state
-        meteoraLPValueUSD = depositsForActivePositions
-        console.log('🌊 Estimated Meteora LP value:', meteoraLPValueUSD)
+        // For each NFT with net active positions, calculate remaining value
+        nftOpenCounts.forEach((openCount, nft) => {
+          const closeCount = nftCloseCounts.get(nft) || 0
+          const netPositions = openCount - closeCount
+          
+          if (netPositions > 0) {
+            // Calculate deposits for this NFT
+            const deposits = opens
+              .filter(tx => tx.position_nft_address === nft)
+              .reduce((sum, tx) => sum + Math.abs(parseFloat(tx.total_usd) || 0), 0)
+            
+            // Calculate withdrawals for this NFT
+            const withdrawals = closes
+              .filter(tx => tx.position_nft_address === nft)
+              .reduce((sum, tx) => sum + Math.abs(parseFloat(tx.total_usd) || 0), 0)
+            
+            // Net value = deposits - withdrawals
+            const netValue = deposits - withdrawals
+            console.log(`🌊 NFT ${nft.slice(0, 8)}...: deposits=$${deposits.toFixed(2)}, withdrawals=$${withdrawals.toFixed(2)}, net=$${netValue.toFixed(2)}`)
+            meteoraLPValueUSD += Math.max(0, netValue) // Don't count negative (already withdrawn more than deposited)
+          }
+        })
+        console.log('🌊 Total Meteora LP value:', meteoraLPValueUSD.toFixed(2))
       }
 
       // Calculate total portfolio value in SOL equivalent
