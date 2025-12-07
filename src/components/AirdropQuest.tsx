@@ -208,19 +208,11 @@ const TASK_DEFINITIONS = {
   },
   'weekly-review': {
     task: 'Weekly Review & Rebalance',
-    protocol: 'All',
+    protocol: 'Meteora',
     points: 50,
     icon: '📊',
-    instruction: 'Review all positions, rebalance if out of range, check APRs',
-    link: undefined
-  },
-  'weekly-plan': {
-    task: 'Plan Next Week Strategy',
-    protocol: 'All',
-    points: 20,
-    icon: '📋',
-    instruction: 'Review airdrop opportunities and plan activities for the week',
-    link: undefined
+    instruction: 'Rebalance Meteora positions if out of range, check APRs',
+    link: 'https://app.meteora.ag/dlmm'
   },
   'jupiter-limit': {
     task: 'Place Limit Order',
@@ -317,17 +309,6 @@ const generateDailyTasks = (activityStatus: ActivityStatus): DailyTask[] => {
       ...weeklyReview,
       completed: activityStatus.rebalancedThisWeek || activityStatus.totalTransactionsThisWeek >= 3,
       autoDetected: activityStatus.rebalancedThisWeek || activityStatus.totalTransactionsThisWeek >= 3,
-    })
-  }
-  
-  // Weekly planning - Sunday
-  if (dayOfWeek === 0) {
-    const weeklyPlan = TASK_DEFINITIONS['weekly-plan']
-    tasks.push({
-      id: 'weekly-plan',
-      ...weeklyPlan,
-      completed: activityStatus.totalTransactionsThisWeek > 0,
-      autoDetected: activityStatus.totalTransactionsThisWeek > 0,
     })
   }
   

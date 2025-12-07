@@ -361,6 +361,7 @@ export default function HomePage() {
 
   const loadRecentActivity = async (userId: string) => {
     try {
+      // Load Meteora transactions from database
       const { data: transactions } = await supabase
         .from('position_transactions')
         .select('*')
@@ -368,17 +369,26 @@ export default function HomePage() {
         .order('block_time', { ascending: false })
         .limit(5)
 
+      const activities: RecentActivity[] = []
+      
+      // Add Meteora transactions
       if (transactions) {
-        setRecentActivity(transactions.map(tx => ({
-          id: tx.id,
-          type: tx.tx_type,
-          description: tx.tx_type === 'position_open' ? 'Position Opened' :
-                      tx.tx_type === 'position_close' ? 'Position Closed' :
-                      tx.tx_type === 'fee_claim' ? 'Fees Claimed' : 'Transaction',
-          amount: `$${Math.abs(parseFloat(tx.total_usd) || 0).toFixed(2)}`,
-          timestamp: new Date(tx.block_time * 1000),
-        })))
+        transactions.forEach(tx => {
+          activities.push({
+            id: tx.id,
+            type: tx.tx_type,
+            description: tx.tx_type === 'position_open' ? '🌊 Meteora LP Opened' :
+                        tx.tx_type === 'position_close' ? '🌊 Meteora LP Closed' :
+                        tx.tx_type === 'fee_claim' ? '🌊 Meteora Fees Claimed' : '🌊 Meteora Transaction',
+            amount: `$${Math.abs(parseFloat(tx.total_usd) || 0).toFixed(2)}`,
+            timestamp: new Date(tx.block_time * 1000),
+          })
+        })
       }
+      
+      // Sort by timestamp and limit
+      activities.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
+      setRecentActivity(activities.slice(0, 5))
     } catch (error) {
       console.error('Error loading recent activity:', error)
     }
@@ -662,7 +672,10 @@ export default function HomePage() {
                   <div key={activity.id} className="flex items-center justify-between py-2 border-b border-slate-700/50 last:border-0">
                     <div className="flex items-center gap-3">
                       <span className="text-lg">
-                        {activity.type === 'position_open' ? '📈' : 
+                        {activity.description.includes('Meteora') ? '🌊' : 
+                         activity.description.includes('Jupiter') ? '🪐' : 
+                         activity.description.includes('Sanctum') ? '⭐' : 
+                         activity.type === 'position_open' ? '📈' : 
                          activity.type === 'position_close' ? '📉' : 
                          activity.type === 'fee_claim' ? '💰' : '📋'}
                       </span>
