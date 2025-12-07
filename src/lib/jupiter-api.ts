@@ -288,10 +288,13 @@ export async function quickCheckJupiterSwaps(walletAddress: string): Promise<{
         // Debug: Log programs found in first few transactions
         if (todaySignatures.indexOf(sig) < 3) {
           const jupiterRelated = allProgramIds.filter((p: string) => 
-            p.startsWith('JUP') || p.includes('jup') || p === JUPITER_V6 || p === JUPITER_V4
+            p && (p.startsWith('JUP') || p.includes('jup') || p === JUPITER_V6 || p === JUPITER_V4)
           )
-          console.log('🪐 TX', sig.signature.slice(0, 12), '- Programs:', allProgramIds.length, 
-            jupiterRelated.length > 0 ? '- Jupiter related:' + jupiterRelated : '')
+          // Log all program IDs for debugging
+          console.log('🪐 TX', sig.signature.slice(0, 12), '- All programs:', allProgramIds.slice(0, 5).map((p: string) => p?.slice(0, 8)))
+          if (jupiterRelated.length > 0) {
+            console.log('🪐 Jupiter related:', jupiterRelated)
+          }
         }
         
         // Check for Jupiter v6 or v4 swap (also check for JUP prefix)
@@ -339,20 +342,36 @@ export async function checkSanctumLST(walletAddress: string): Promise<boolean> {
   console.log('⭐ Checking Sanctum LST holdings for:', walletAddress)
   
   // Common Sanctum LST mint addresses with names
+  // Full list from Sanctum: https://app.sanctum.so/
   const SANCTUM_LSTS: { [mint: string]: string } = {
+    // Major LSTs
     'INFp2k2GLVEA8Wvs4mEyDA1LBKHA3HfHx3X8pKNF4Qf': 'INF', // INF (infinity)
     'bSo13r4TkiE4KumL71LsHTPpL2euBYLFx6h9HP3piy1': 'bSOL', // bSOL (Blaze)
     '7kbnvuGBxxj8AG9qp8Scn56muWGaRaFqxg1FsRp3PaFT': 'stSOL', // stSOL (Lido)
     'mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So': 'mSOL', // mSOL (Marinade)
     'J1toso1uCk3RLmjorhTtrVwY9HJ7X8V9yYac6Y7kGCPn': 'JitoSOL', // JitoSOL
+    'jupSoLaHXQiZZTSfEWMTRRgpnyFm8f6sZdosWBjx93v': 'jupSOL', // jupSOL
+    
+    // Other Sanctum LSTs
+    '5oVNBeEEQvYi1cX3ir8Dx5n1P7pdxydbGF2X4TxVusJm': 'scnSOL', // Socean staked SOL
     'edge86g9cVz87xcpKpy3J77vbp4wYd9idEV562CCntt': 'edgeSOL', // edgeSOL
     'he1iusmfkpAdwvxLNGV8Y1iSbj4rUy6yMhEA3fotn9A': 'hSOL', // hSOL
     'Dso1bDeDjCQxTrWHqUUi63oBvV7Mdm6WaobLbQ7gnPQ': 'DSOL', // DSOL
     'LAinEtNLgpmCP9Rvsf5Hn8W6EhNiKLZQti1xfWMLy6X': 'laineSOL', // laineSOL
-    'jupSoLaHXQiZZTSfEWMTRRgpnyFm8f6sZdosWBjx93v': 'jupSOL', // jupSOL
     'picobAEvs6w7QEknPce34wAE4gknZA9v5tTonnmHYdX': 'picoSOL', // picoSOL
     'Comp4ssDzXcLeu2MnLuGNNFC4cmLPMng8qWHPvzAMU1h': 'compassSOL', // compassSOL
     'BonK1YhkXEGLZzwtcvRTip3gAL9nCeQD7ppZBLXhtTs': 'bonkSOL', // bonkSOL
+    'strng7mqqc1MBJJV6vMzYbEqnwVGvKKGKedeCvtktWA': 'strongSOL', // strongSOL
+    'GEJpt3Wjmr628FqXxTgxMce1pLntcPV4uFi8ksxMyPQh': 'daoSOL', // daoSOL
+    'Bybit2vBJGhPF52GBdNaQfUJ6ZpThSgHBobjWZpLPb4B': 'bbSOL', // bbSOL
+    'vSoLxydx6akxyMD9XEcPvGYNGq6Nn66oqVb3UkGkei7': 'vSOL', // vSOL
+    'pumpkinsEq8xENVZE6QgTS93EN4r9iKvNxNALS1ooyp': 'pumpkinSOL', // pumpkinSOL
+    'phaseZSfPxTDBpiVb96H4XFSD8xHeHxZre5HerehBJG': 'phaseSOL', // phaseSOL
+    'BgYgFYq4A9a2o5S1QbWkmYVFBh7LBQL8YvugdhieFg38': 'clockSOL', // clockSOL
+    'HUBsveNpjo5pWqNkH57QzxjQASdTVXcSK7bVKTSZtcSX': 'hubSOL', // hubSOL
+    'LSTxxxnJzKDFSLr4dUkPcmCf5VyryEqzPLz5j4bpxFp': 'LST', // LST
+    'pathdXw4He1Xk3eX84pDdDZnGKEme3GivBamGCVPZ5a': 'pathSOL', // pathSOL
+    'rswnoHTUEPBdZmjFPxtBBB8WwwqaSsLLE4q8GCRCW3c': 'rswSOL', // rswSOL
   }
 
   try {
@@ -375,26 +394,47 @@ export async function checkSanctumLST(walletAddress: string): Promise<boolean> {
     const accounts = data.result?.value || []
     console.log('⭐ Found', accounts.length, 'token accounts')
 
-    // Debug: Log all token holdings
+    // Known non-LST tokens to ignore
+    const KNOWN_TOKENS: { [mint: string]: string } = {
+      'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v': 'USDC',
+      'So11111111111111111111111111111111111111112': 'SOL',
+      'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB': 'USDT',
+    }
+    
+    // Debug: Log all token holdings with FULL mint addresses
     console.log('⭐ Token holdings:')
+    let foundLST = false
+    let unknownTokens: string[] = []
+    
     for (const account of accounts) {
       const mint = account.account?.data?.parsed?.info?.mint
       const amount = account.account?.data?.parsed?.info?.tokenAmount?.uiAmount || 0
-      const symbol = account.account?.data?.parsed?.info?.tokenAmount?.symbol
       
-      if (amount > 0) {
-        const lstName = SANCTUM_LSTS[mint]
-        console.log(`⭐   ${lstName || 'Unknown'} (${mint?.slice(0, 8)}...): ${amount}`)
-      }
+      if (!mint || amount <= 0) continue
       
-      if (mint && mint in SANCTUM_LSTS && amount > 0) {
-        console.log(`⭐ ✅ Found Sanctum LST: ${SANCTUM_LSTS[mint]}: ${amount}`)
-        return true
+      const lstName = SANCTUM_LSTS[mint]
+      const knownName = KNOWN_TOKENS[mint]
+      
+      if (lstName) {
+        console.log(`⭐ ✅ Found Sanctum LST: ${lstName} (${mint}): ${amount}`)
+        foundLST = true
+      } else if (knownName) {
+        console.log(`⭐   ${knownName}: ${amount}`)
+      } else {
+        // Log full mint address for unknown tokens - might be an LST we don't have
+        console.log(`⭐   Unknown token: ${mint} - Amount: ${amount}`)
+        unknownTokens.push(mint)
       }
     }
+    
+    if (foundLST) {
+      return true
+    }
 
-    console.log('⭐ No Sanctum LSTs found in', accounts.length, 'accounts')
-    console.log('⭐ Looking for these LSTs:', Object.values(SANCTUM_LSTS).join(', '))
+    if (unknownTokens.length > 0) {
+      console.log('⭐ Unknown tokens (might be LSTs):', unknownTokens)
+    }
+    console.log('⭐ No Sanctum LSTs found. Looking for:', Object.keys(SANCTUM_LSTS).length, 'known LSTs')
     return false
   } catch (error) {
     console.error('⭐ Error checking Sanctum LST:', error)
