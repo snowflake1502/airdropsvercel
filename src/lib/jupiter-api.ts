@@ -397,7 +397,7 @@ export async function checkSanctumLST(walletAddress: string): Promise<boolean> {
     'jupSoLaHXQiZZTSfEWMTRRgpnyFm8f6sZdosWBjx93v': 'jupSOL', // jupSOL
     
     // Other Sanctum LSTs
-    '5oVNBeEEQvYi1cX3ir8Dx5n1P7pdxydbGF2X4TxVusJm': 'scnSOL', // Socean staked SOL
+    '5oVNBeEEQvYi1cX3ir8Dx5n1P7pdxydbGF2X4TxVusJm': 'INF', // Sanctum Infinity
     'edge86g9cVz87xcpKpy3J77vbp4wYd9idEV562CCntt': 'edgeSOL', // edgeSOL
     'he1iusmfkpAdwvxLNGV8Y1iSbj4rUy6yMhEA3fotn9A': 'hSOL', // hSOL
     'Dso1bDeDjCQxTrWHqUUi63oBvV7Mdm6WaobLbQ7gnPQ': 'DSOL', // DSOL
@@ -487,37 +487,42 @@ export async function checkSanctumLST(walletAddress: string): Promise<boolean> {
 }
 
 /**
- * Get Sanctum LST balance with symbol
- * Returns the balance in SOL-equivalent terms (LSTs are ~1:1 with SOL)
+ * Get Sanctum LST balance with symbol and SOL-equivalent value
+ * LSTs have different exchange rates to SOL due to staking rewards
  */
-export async function getSanctumLSTBalance(walletAddress: string): Promise<{ balance: number; symbol: string } | null> {
-  // Sanctum LST mint addresses with names
-  const SANCTUM_LSTS: { [mint: string]: string } = {
-    'INFp2k2GLVEA8Wvs4mEyDA1LBKHA3HfHx3X8pKNF4Qf': 'INF',
-    'bSo13r4TkiE4KumL71LsHTPpL2euBYLFx6h9HP3piy1': 'bSOL',
-    '7kbnvuGBxxj8AG9qp8Scn56muWGaRaFqxg1FsRp3PaFT': 'stSOL',
-    'mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So': 'mSOL',
-    'J1toso1uCk3RLmjorhTtrVwY9HJ7X8V9yYac6Y7kGCPn': 'JitoSOL',
-    'jupSoLaHXQiZZTSfEWMTRRgpnyFm8f6sZdosWBjx93v': 'jupSOL',
-    '5oVNBeEEQvYi1cX3ir8Dx5n1P7pdxydbGF2X4TxVusJm': 'scnSOL',
-    'edge86g9cVz87xcpKpy3J77vbp4wYd9idEV562CCntt': 'edgeSOL',
-    'he1iusmfkpAdwvxLNGV8Y1iSbj4rUy6yMhEA3fotn9A': 'hSOL',
-    'Dso1bDeDjCQxTrWHqUUi63oBvV7Mdm6WaobLbQ7gnPQ': 'DSOL',
-    'LAinEtNLgpmCP9Rvsf5Hn8W6EhNiKLZQti1xfWMLy6X': 'laineSOL',
-    'picobAEvs6w7QEknPce34wAE4gknZA9v5tTonnmHYdX': 'picoSOL',
-    'Comp4ssDzXcLeu2MnLuGNNFC4cmLPMng8qWHPvzAMU1h': 'compassSOL',
-    'BonK1YhkXEGLZzwtcvRTip3gAL9nCeQD7ppZBLXhtTs': 'bonkSOL',
-    'strng7mqqc1MBJJV6vMzYbEqnwVGvKKGKedeCvtktWA': 'strongSOL',
-    'GEJpt3Wjmr628FqXxTgxMce1pLntcPV4uFi8ksxMyPQh': 'daoSOL',
-    'Bybit2vBJGhPF52GBdNaQfUJ6ZpThSgHBobjWZpLPb4B': 'bbSOL',
-    'vSoLxydx6akxyMD9XEcPvGYNGq6Nn66oqVb3UkGkei7': 'vSOL',
-    'pumpkinsEq8xENVZE6QgTS93EN4r9iKvNxNALS1ooyp': 'pumpkinSOL',
-    'phaseZSfPxTDBpiVb96H4XFSD8xHeHxZre5HerehBJG': 'phaseSOL',
-    'BgYgFYq4A9a2o5S1QbWkmYVFBh7LBQL8YvugdhieFg38': 'clockSOL',
-    'HUBsveNpjo5pWqNkH57QzxjQASdTVXcSK7bVKTSZtcSX': 'hubSOL',
-    'LSTxxxnJzKDFSLr4dUkPcmCf5VyryEqzPLz5j4bpxFp': 'LST',
-    'pathdXw4He1Xk3eX84pDdDZnGKEme3GivBamGCVPZ5a': 'pathSOL',
-    'rswnoHTUEPBdZmjFPxtBBB8WwwqaSsLLE4q8GCRCW3c': 'rswSOL',
+export async function getSanctumLSTBalance(walletAddress: string): Promise<{ 
+  balance: number
+  symbol: string
+  solEquivalent: number  // Actual SOL value based on exchange rate
+} | null> {
+  // Sanctum LST mint addresses with names and approximate exchange rates
+  // Exchange rates: How many SOL you get for 1 LST (updates with staking rewards)
+  const SANCTUM_LSTS: { [mint: string]: { symbol: string; rate: number } } = {
+    '5oVNBeEEQvYi1cX3ir8Dx5n1P7pdxydbGF2X4TxVusJm': { symbol: 'INF', rate: 1.38 }, // INF - accrues value
+    'INFp2k2GLVEA8Wvs4mEyDA1LBKHA3HfHx3X8pKNF4Qf': { symbol: 'INF', rate: 1.38 },
+    'bSo13r4TkiE4KumL71LsHTPpL2euBYLFx6h9HP3piy1': { symbol: 'bSOL', rate: 1.08 },
+    '7kbnvuGBxxj8AG9qp8Scn56muWGaRaFqxg1FsRp3PaFT': { symbol: 'stSOL', rate: 1.15 },
+    'mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So': { symbol: 'mSOL', rate: 1.12 },
+    'J1toso1uCk3RLmjorhTtrVwY9HJ7X8V9yYac6Y7kGCPn': { symbol: 'JitoSOL', rate: 1.10 },
+    'jupSoLaHXQiZZTSfEWMTRRgpnyFm8f6sZdosWBjx93v': { symbol: 'jupSOL', rate: 1.08 },
+    'edge86g9cVz87xcpKpy3J77vbp4wYd9idEV562CCntt': { symbol: 'edgeSOL', rate: 1.05 },
+    'he1iusmfkpAdwvxLNGV8Y1iSbj4rUy6yMhEA3fotn9A': { symbol: 'hSOL', rate: 1.05 },
+    'Dso1bDeDjCQxTrWHqUUi63oBvV7Mdm6WaobLbQ7gnPQ': { symbol: 'DSOL', rate: 1.05 },
+    'LAinEtNLgpmCP9Rvsf5Hn8W6EhNiKLZQti1xfWMLy6X': { symbol: 'laineSOL', rate: 1.05 },
+    'picobAEvs6w7QEknPce34wAE4gknZA9v5tTonnmHYdX': { symbol: 'picoSOL', rate: 1.02 },
+    'Comp4ssDzXcLeu2MnLuGNNFC4cmLPMng8qWHPvzAMU1h': { symbol: 'compassSOL', rate: 1.05 },
+    'BonK1YhkXEGLZzwtcvRTip3gAL9nCeQD7ppZBLXhtTs': { symbol: 'bonkSOL', rate: 1.02 },
+    'strng7mqqc1MBJJV6vMzYbEqnwVGvKKGKedeCvtktWA': { symbol: 'strongSOL', rate: 1.05 },
+    'GEJpt3Wjmr628FqXxTgxMce1pLntcPV4uFi8ksxMyPQh': { symbol: 'daoSOL', rate: 1.05 },
+    'Bybit2vBJGhPF52GBdNaQfUJ6ZpThSgHBobjWZpLPb4B': { symbol: 'bbSOL', rate: 1.05 },
+    'vSoLxydx6akxyMD9XEcPvGYNGq6Nn66oqVb3UkGkei7': { symbol: 'vSOL', rate: 1.05 },
+    'pumpkinsEq8xENVZE6QgTS93EN4r9iKvNxNALS1ooyp': { symbol: 'pumpkinSOL', rate: 1.02 },
+    'phaseZSfPxTDBpiVb96H4XFSD8xHeHxZre5HerehBJG': { symbol: 'phaseSOL', rate: 1.02 },
+    'BgYgFYq4A9a2o5S1QbWkmYVFBh7LBQL8YvugdhieFg38': { symbol: 'clockSOL', rate: 1.02 },
+    'HUBsveNpjo5pWqNkH57QzxjQASdTVXcSK7bVKTSZtcSX': { symbol: 'hubSOL', rate: 1.05 },
+    'LSTxxxnJzKDFSLr4dUkPcmCf5VyryEqzPLz5j4bpxFp': { symbol: 'LST', rate: 1.05 },
+    'pathdXw4He1Xk3eX84pDdDZnGKEme3GivBamGCVPZ5a': { symbol: 'pathSOL', rate: 1.02 },
+    'rswnoHTUEPBdZmjFPxtBBB8WwwqaSsLLE4q8GCRCW3c': { symbol: 'rswSOL', rate: 1.05 },
   }
 
   try {
@@ -544,7 +549,14 @@ export async function getSanctumLSTBalance(walletAddress: string): Promise<{ bal
       const amount = account.account?.data?.parsed?.info?.tokenAmount?.uiAmount || 0
       
       if (mint && mint in SANCTUM_LSTS && amount > 0) {
-        return { balance: amount, symbol: SANCTUM_LSTS[mint] }
+        const lstInfo = SANCTUM_LSTS[mint]
+        const solEquivalent = amount * lstInfo.rate
+        console.log(`⭐ ${lstInfo.symbol}: ${amount} × ${lstInfo.rate} = ${solEquivalent.toFixed(4)} SOL`)
+        return { 
+          balance: amount, 
+          symbol: lstInfo.symbol,
+          solEquivalent 
+        }
       }
     }
 

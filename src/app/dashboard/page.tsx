@@ -17,7 +17,8 @@ interface PortfolioStats {
   totalValueUSD: number
   solBalance: number
   usdcBalance: number
-  lstBalance: number // Sanctum LST balance in SOL equivalent
+  lstBalance: number // Raw LST token balance
+  lstSolEquivalent: number // LST value in SOL terms (using exchange rate)
   lstSymbol: string
   activePositions: number
   totalPnL: number
@@ -47,6 +48,7 @@ export default function HomePage() {
     solBalance: 0,
     usdcBalance: 0,
     lstBalance: 0,
+    lstSolEquivalent: 0,
     lstSymbol: '',
     activePositions: 0,
     totalPnL: 0,
@@ -246,6 +248,7 @@ export default function HomePage() {
       // Check for Sanctum LST holdings and get balance
       let hasSanctumPosition = false
       let lstBalance = 0
+      let lstSolEquivalent = 0  // Actual SOL value (accounts for exchange rate)
       let lstSymbol = ''
       try {
         const lstData = await getSanctumLSTBalance(walletAddress)
@@ -253,14 +256,15 @@ export default function HomePage() {
           hasSanctumPosition = true
           lstBalance = lstData.balance
           lstSymbol = lstData.symbol
+          lstSolEquivalent = lstData.solEquivalent  // Use actual exchange rate
         }
       } catch (err) {
         console.warn('Could not check Sanctum LST:', err)
       }
 
       // Calculate total portfolio value in SOL equivalent
-      // SOL balance + LST balance (1:1 with SOL) + USDC converted to SOL
-      const totalSOLEquivalent = solBalance + lstBalance + (usdcBalance / solPriceUSD)
+      // SOL balance + LST balance (using actual exchange rate) + USDC converted to SOL
+      const totalSOLEquivalent = solBalance + lstSolEquivalent + (usdcBalance / solPriceUSD)
       
       // Calculate P&L based on initial investment
       // User can set their initial investment (default 5 SOL)
@@ -287,8 +291,8 @@ export default function HomePage() {
         pnlInUSD,
       })
 
-      // Total value includes: SOL + USDC + LST (valued at SOL price)
-      const totalValueUSD = (solBalance * solPriceUSD) + usdcBalance + (lstBalance * solPriceUSD)
+      // Total value includes: SOL + USDC + LST (using actual exchange rate)
+      const totalValueUSD = (solBalance * solPriceUSD) + usdcBalance + (lstSolEquivalent * solPriceUSD)
       
       // Calculate positions by protocol
       const meteoraPositions = activePositionCount
@@ -302,6 +306,7 @@ export default function HomePage() {
         solBalance,
         usdcBalance,
         lstBalance,
+        lstSolEquivalent,
         lstSymbol,
         activePositions: totalPositions,
         totalPnL: pnlInUSD,
@@ -441,7 +446,9 @@ export default function HomePage() {
                     <div className="flex items-center gap-2 bg-purple-500/10 rounded-lg px-3 py-1.5 border border-purple-500/20">
                       <span className="text-lg">⭐</span>
                       <span className="text-purple-300 text-sm font-medium">{stats.lstBalance.toFixed(4)} {stats.lstSymbol}</span>
-                      <span className="text-purple-400 text-xs">(${(stats.lstBalance * solPriceUSD).toFixed(2)})</span>
+                      <span className="text-purple-400 text-xs">
+                        (≈{stats.lstSolEquivalent.toFixed(4)} SOL = ${(stats.lstSolEquivalent * solPriceUSD).toFixed(2)})
+                      </span>
                     </div>
                   )}
                 </div>
