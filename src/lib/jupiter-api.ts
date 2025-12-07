@@ -287,24 +287,42 @@ export async function quickCheckJupiterSwaps(walletAddress: string): Promise<{
         
         // Debug: Log programs found in first few transactions
         if (todaySignatures.indexOf(sig) < 3) {
+          // Log FULL program IDs for debugging
+          console.log('🪐 TX', sig.signature.slice(0, 12), '- Programs (full):', allProgramIds.filter((p: string) => p && p.length > 30))
+          
           const jupiterRelated = allProgramIds.filter((p: string) => 
-            p && (p.startsWith('JUP') || p.includes('jup') || p === JUPITER_V6 || p === JUPITER_V4)
+            p && (p.startsWith('JUP') || p.toLowerCase().includes('jup') || p === JUPITER_V6 || p === JUPITER_V4)
           )
-          // Log all program IDs for debugging
-          console.log('🪐 TX', sig.signature.slice(0, 12), '- All programs:', allProgramIds.slice(0, 5).map((p: string) => p?.slice(0, 8)))
           if (jupiterRelated.length > 0) {
-            console.log('🪐 Jupiter related:', jupiterRelated)
+            console.log('🪐 ✅ Jupiter programs found:', jupiterRelated)
           }
         }
         
-        // Check for Jupiter v6 or v4 swap (also check for JUP prefix)
+        // Check for Jupiter swap - multiple detection methods
+        // Jupiter v6, v4, or any program starting with JUP
         const isJupiterSwap = allProgramIds.includes(JUPITER_V6) || 
                               allProgramIds.includes(JUPITER_V4) ||
-                              allProgramIds.some((p: string) => p.startsWith('JUP'))
-        if (isJupiterSwap) {
+                              allProgramIds.some((p: string) => p && p.startsWith('JUP'))
+        
+        // Also check for Jupiter aggregator route programs
+        const JUPITER_ROUTE_PROGRAMS = [
+          'JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4', // Jupiter v6
+          'JUP4Fb2cqiRUcaTHdrPC8h2gNsA2ETXiPDD33WcGuJB', // Jupiter v4
+          'JUP3c2Uh3WA4Ng34tw6kPd2G4C5BB21Xo36Je1s32Ph', // Jupiter v3
+          'JUP2jxvXaqu7NQY1GmNF4m1vodw12LVXYxbFL2uJvfo', // Jupiter v2
+          'whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc', // Whirlpool (Orca) - often used by Jupiter
+          '675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8', // Raydium AMM - often used by Jupiter
+          'CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK', // Raydium CLMM
+          'LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo', // Meteora DLMM
+          'Eo7WjKq67rjJQSZxS6z3YkapzY3eMj6Xy8X5EQVn5UaB', // Phoenix
+          'srmqPvymJeFKQ4zGQed1GFppgkRHL9kaELCbyksJtPX', // Serum/OpenBook
+        ]
+        
+        const usesJupiterRoute = allProgramIds.some((p: string) => JUPITER_ROUTE_PROGRAMS.includes(p))
+        if (isJupiterSwap || usesJupiterRoute) {
           hasSwapToday = true
           totalSwapsDetected++
-          console.log('🪐 ✅ Found Jupiter swap:', sig.signature.slice(0, 20) + '...')
+          console.log('🪐 ✅ Found swap (Jupiter/DEX):', sig.signature.slice(0, 20) + '...')
         }
         
         // Check for limit orders
