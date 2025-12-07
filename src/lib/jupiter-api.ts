@@ -264,7 +264,10 @@ export async function quickCheckJupiterSwaps(walletAddress: string): Promise<{
 
         const txData = await txResponse.json()
         const tx = txData.result
-        if (!tx?.transaction?.message) continue
+        if (!tx?.transaction?.message) {
+          console.log('🪐 No transaction data for:', sig.signature.slice(0, 20))
+          continue
+        }
 
         // Get all account keys (both static and loaded)
         const accountKeys = tx.transaction.message.accountKeys || []
@@ -274,10 +277,27 @@ export async function quickCheckJupiterSwaps(walletAddress: string): Promise<{
         const instructions = tx.transaction.message.instructions || []
         const programIdsFromInstructions = instructions.map((ix: any) => ix.programId).filter(Boolean)
         
-        const allProgramIds = [...staticKeys, ...programIdsFromInstructions]
+        // Check inner instructions too (Jupiter often uses inner instructions)
+        const innerInstructions = tx.meta?.innerInstructions || []
+        const innerProgramIds = innerInstructions.flatMap((inner: any) => 
+          (inner.instructions || []).map((ix: any) => ix.programId)
+        ).filter(Boolean)
         
-        // Check for Jupiter v6 or v4 swap
-        const isJupiterSwap = allProgramIds.includes(JUPITER_V6) || allProgramIds.includes(JUPITER_V4)
+        const allProgramIds = [...new Set([...staticKeys, ...programIdsFromInstructions, ...innerProgramIds])]
+        
+        // Debug: Log programs found in first few transactions
+        if (todaySignatures.indexOf(sig) < 3) {
+          const jupiterRelated = allProgramIds.filter((p: string) => 
+            p.startsWith('JUP') || p.includes('jup') || p === JUPITER_V6 || p === JUPITER_V4
+          )
+          console.log('🪐 TX', sig.signature.slice(0, 12), '- Programs:', allProgramIds.length, 
+            jupiterRelated.length > 0 ? '- Jupiter related:' + jupiterRelated : '')
+        }
+        
+        // Check for Jupiter v6 or v4 swap (also check for JUP prefix)
+        const isJupiterSwap = allProgramIds.includes(JUPITER_V6) || 
+                              allProgramIds.includes(JUPITER_V4) ||
+                              allProgramIds.some((p: string) => p.startsWith('JUP'))
         if (isJupiterSwap) {
           hasSwapToday = true
           totalSwapsDetected++
@@ -355,18 +375,26 @@ export async function checkSanctumLST(walletAddress: string): Promise<boolean> {
     const accounts = data.result?.value || []
     console.log('⭐ Found', accounts.length, 'token accounts')
 
-    // Check if any account holds a Sanctum LST
+    // Debug: Log all token holdings
+    console.log('⭐ Token holdings:')
     for (const account of accounts) {
       const mint = account.account?.data?.parsed?.info?.mint
       const amount = account.account?.data?.parsed?.info?.tokenAmount?.uiAmount || 0
+      const symbol = account.account?.data?.parsed?.info?.tokenAmount?.symbol
+      
+      if (amount > 0) {
+        const lstName = SANCTUM_LSTS[mint]
+        console.log(`⭐   ${lstName || 'Unknown'} (${mint?.slice(0, 8)}...): ${amount}`)
+      }
       
       if (mint && mint in SANCTUM_LSTS && amount > 0) {
-        console.log(`⭐ ✅ Found ${SANCTUM_LSTS[mint]}: ${amount}`)
+        console.log(`⭐ ✅ Found Sanctum LST: ${SANCTUM_LSTS[mint]}: ${amount}`)
         return true
       }
     }
 
-    console.log('⭐ No Sanctum LSTs found')
+    console.log('⭐ No Sanctum LSTs found in', accounts.length, 'accounts')
+    console.log('⭐ Looking for these LSTs:', Object.values(SANCTUM_LSTS).join(', '))
     return false
   } catch (error) {
     console.error('⭐ Error checking Sanctum LST:', error)
