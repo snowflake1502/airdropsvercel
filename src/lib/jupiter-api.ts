@@ -5,7 +5,16 @@
 
 // Jupiter API endpoints
 const JUPITER_API_BASE = 'https://api.jup.ag'
-const HELIUS_RPC = process.env.NEXT_PUBLIC_SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com'
+
+// Use RPC proxy in browser, or direct RPC on server
+const getRpcUrl = () => {
+  // In browser, use the proxy endpoint
+  if (typeof window !== 'undefined') {
+    return `${window.location.origin}/api/rpc`
+  }
+  // On server, use direct RPC
+  return process.env.NEXT_PUBLIC_SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com'
+}
 
 interface SwapTransaction {
   signature: string
@@ -61,7 +70,10 @@ export async function getJupiterActivity(walletAddress: string): Promise<Jupiter
 
   try {
     // Use Helius parsed transaction history if available
-    const response = await fetch(HELIUS_RPC, {
+    const rpcUrl = getRpcUrl()
+    console.log('🔗 Using RPC:', rpcUrl)
+    
+    const response = await fetch(rpcUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -105,7 +117,7 @@ export async function getJupiterActivity(walletAddress: string): Promise<Jupiter
     // Check each transaction
     for (const sig of signatures.slice(0, 50)) { // Check first 50 for performance
       try {
-        const txResponse = await fetch(HELIUS_RPC, {
+        const txResponse = await fetch(getRpcUrl(), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -199,7 +211,7 @@ export async function quickCheckJupiterSwaps(walletAddress: string): Promise<{
   
   try {
     // Get recent signatures - check more transactions
-    const response = await fetch(HELIUS_RPC, {
+    const response = await fetch(getRpcUrl(), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -239,7 +251,7 @@ export async function quickCheckJupiterSwaps(walletAddress: string): Promise<{
     // Check today's transactions first (up to 10)
     for (const sig of todaySignatures.slice(0, 10)) {
       try {
-        const txResponse = await fetch(HELIUS_RPC, {
+        const txResponse = await fetch(getRpcUrl(), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -324,7 +336,7 @@ export async function checkSanctumLST(walletAddress: string): Promise<boolean> {
   }
 
   try {
-    const response = await fetch(HELIUS_RPC, {
+    const response = await fetch(getRpcUrl(), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
