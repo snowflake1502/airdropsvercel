@@ -449,7 +449,7 @@ export default function AirdropQuest({ userId, walletAddress, transactions }: Ai
       
       setDailyTasks(mergedTasks)
       
-      // Calculate Meteora points
+      // === CALCULATE METEORA POINTS ===
       const opens = transactions.filter(tx => tx.tx_type === 'position_open')
       const fees = transactions.filter(tx => tx.tx_type === 'fee_claim')
       const uniqueDays = new Set(transactions.map(tx => 
@@ -476,7 +476,23 @@ export default function AirdropQuest({ userId, walletAddress, transactions }: Ai
       if (currentStreak >= 30) meteoraPoints += 300
       setStreak(currentStreak)
       
-      // Update protocols
+      // === CALCULATE JUPITER POINTS ===
+      let jupiterPoints = 0
+      if (fullStatus.hasJupiterSwapToday) jupiterPoints += 10 // Swap today
+      if (fullStatus.hasJupiterLimitOrderToday) jupiterPoints += 20 // Limit order today
+      if (fullStatus.hasJupiterPerpsToday) jupiterPoints += 30 // Perps today
+      // Note: Historical Jupiter activity would need transaction parsing like Meteora
+      
+      // === CALCULATE SANCTUM POINTS ===
+      let sanctumPoints = 0
+      if (fullStatus.hasSanctumLST) {
+        sanctumPoints += 100 // Holding LST bonus
+        sanctumPoints += 40 // Daily holding points
+      }
+      
+      console.log('📊 Protocol Points:', { meteoraPoints, jupiterPoints, sanctumPoints })
+      
+      // Update protocols with ALL calculated points
       const updatedProtocols = PROTOCOL_CONFIGS.map(config => {
         let points = 0
         let protocolStreak = 0
@@ -484,12 +500,17 @@ export default function AirdropQuest({ userId, walletAddress, transactions }: Ai
         if (config.id === 'meteora') {
           points = meteoraPoints
           protocolStreak = currentStreak
+        } else if (config.id === 'jupiter') {
+          points = jupiterPoints
+        } else if (config.id === 'sanctum') {
+          points = sanctumPoints
         }
         
         const updatedActivities = config.activities.map(activity => {
           let completed = false
           let completedToday = false
           
+          // METEORA activities
           if (config.id === 'meteora') {
             switch (activity.id) {
               case 'meteora-lp':
@@ -513,6 +534,49 @@ export default function AirdropQuest({ userId, walletAddress, transactions }: Ai
             }
           }
           
+          // JUPITER activities
+          if (config.id === 'jupiter') {
+            switch (activity.id) {
+              case 'jup-swap':
+                completed = fullStatus.hasJupiterSwapToday
+                completedToday = fullStatus.hasJupiterSwapToday
+                break
+              case 'jup-limit':
+                completed = fullStatus.hasJupiterLimitOrderToday
+                completedToday = fullStatus.hasJupiterLimitOrderToday
+                break
+              case 'jup-perp':
+                completed = fullStatus.hasJupiterPerpsToday
+                completedToday = fullStatus.hasJupiterPerpsToday
+                break
+              case 'jup-dca':
+                // Would need DCA detection
+                break
+              case 'jup-stake':
+                // Would need JUP staking detection
+                break
+            }
+          }
+          
+          // SANCTUM activities
+          if (config.id === 'sanctum') {
+            switch (activity.id) {
+              case 'sanctum-stake':
+                completed = fullStatus.hasSanctumLST
+                completedToday = fullStatus.hasSanctumLST
+                break
+              case 'sanctum-swap':
+                // Would need LST swap detection
+                break
+              case 'sanctum-infinity':
+                // Would need Infinity pool detection
+                break
+              case 'sanctum-hold':
+                // Would need 90-day tracking
+                break
+            }
+          }
+          
           return { ...activity, completed, completedToday }
         })
         
@@ -526,8 +590,11 @@ export default function AirdropQuest({ userId, walletAddress, transactions }: Ai
       })
       
       setProtocols(updatedProtocols)
-      setTotalPoints(updatedProtocols.reduce((sum, p) => sum + p.currentPoints, 0))
-      setLevel(Math.floor(updatedProtocols.reduce((sum, p) => sum + p.currentPoints, 0) / 500) + 1)
+      const totalPts = updatedProtocols.reduce((sum, p) => sum + p.currentPoints, 0)
+      setTotalPoints(totalPts)
+      setLevel(Math.floor(totalPts / 500) + 1)
+      
+      console.log('📊 Updated Protocols:', updatedProtocols.map(p => ({ name: p.name, points: p.currentPoints })))
       
     } catch (error) {
       console.error('Error calculating points:', error)

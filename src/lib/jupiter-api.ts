@@ -193,9 +193,12 @@ export async function quickCheckJupiterSwaps(walletAddress: string): Promise<{
   hasSwapToday: boolean
   hasLimitOrderToday: boolean
   hasPerpsToday: boolean
+  totalSwapsDetected: number
 }> {
+  console.log('🪐 Checking Jupiter activity for:', walletAddress)
+  
   try {
-    // Get recent signatures
+    // Get recent signatures - check more transactions
     const response = await fetch(HELIUS_RPC, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -203,12 +206,13 @@ export async function quickCheckJupiterSwaps(walletAddress: string): Promise<{
         jsonrpc: '2.0',
         id: 1,
         method: 'getSignaturesForAddress',
-        params: [walletAddress, { limit: 20 }]
+        params: [walletAddress, { limit: 50 }]
       })
     })
 
     const data = await response.json()
     const signatures = data.result || []
+    console.log('🪐 Found', signatures.length, 'recent signatures')
 
     // Check today's transactions
     const todayStart = new Date()
@@ -218,17 +222,22 @@ export async function quickCheckJupiterSwaps(walletAddress: string): Promise<{
     const todaySignatures = signatures.filter((s: any) => 
       s.blockTime && s.blockTime >= todayTimestamp
     )
+    console.log('🪐 Today signatures:', todaySignatures.length)
 
-    if (todaySignatures.length === 0) {
-      return { hasSwapToday: false, hasLimitOrderToday: false, hasPerpsToday: false }
-    }
-
-    // Check a few transactions for Jupiter activity
+    // Check transactions for Jupiter activity
     let hasSwapToday = false
     let hasLimitOrderToday = false
     let hasPerpsToday = false
+    let totalSwapsDetected = 0
 
-    for (const sig of todaySignatures.slice(0, 5)) {
+    // Jupiter program addresses
+    const JUPITER_V6 = 'JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4'
+    const JUPITER_V4 = 'JUP4Fb2cqiRUcaTHdrPC8h2gNsA2ETXiPDD33WcGuJB'
+    const JUPITER_LIMIT = 'jupoNjAxXgZ4rjzxzPMP4oxduvQsQtZzyknqvzYNrNu'
+    const JUPITER_PERPS = 'PERPHjGBqRHArX4DySjwM6UJHiR3sWAatqfdBS2verN'
+
+    // Check today's transactions first (up to 10)
+    for (const sig of todaySignatures.slice(0, 10)) {
       try {
         const txResponse = await fetch(HELIUS_RPC, {
           method: 'POST',
@@ -243,34 +252,51 @@ export async function quickCheckJupiterSwaps(walletAddress: string): Promise<{
 
         const txData = await txResponse.json()
         const tx = txData.result
-        if (!tx?.transaction?.message?.accountKeys) continue
+        if (!tx?.transaction?.message) continue
 
-        const programIds = tx.transaction.message.accountKeys.map((k: any) => k.pubkey || k)
-
-        // Jupiter swap programs
-        if (programIds.some((p: string) => p.startsWith('JUP'))) {
+        // Get all account keys (both static and loaded)
+        const accountKeys = tx.transaction.message.accountKeys || []
+        const staticKeys = accountKeys.map((k: any) => typeof k === 'string' ? k : k.pubkey)
+        
+        // Also check instructions for program IDs
+        const instructions = tx.transaction.message.instructions || []
+        const programIdsFromInstructions = instructions.map((ix: any) => ix.programId).filter(Boolean)
+        
+        const allProgramIds = [...staticKeys, ...programIdsFromInstructions]
+        
+        // Check for Jupiter v6 or v4 swap
+        const isJupiterSwap = allProgramIds.includes(JUPITER_V6) || allProgramIds.includes(JUPITER_V4)
+        if (isJupiterSwap) {
           hasSwapToday = true
+          totalSwapsDetected++
+          console.log('🪐 ✅ Found Jupiter swap:', sig.signature.slice(0, 20) + '...')
         }
-        // Limit orders
-        if (programIds.includes('jupoNjAxXgZ4rjzxzPMP4oxduvQsQtZzyknqvzYNrNu')) {
+        
+        // Check for limit orders
+        if (allProgramIds.includes(JUPITER_LIMIT)) {
           hasLimitOrderToday = true
+          console.log('🪐 ✅ Found Jupiter limit order')
         }
-        // Perps
-        if (programIds.includes('PERPHjGBqRHArX4DySjwM6UJHiR3sWAatqfdBS2verN')) {
+        
+        // Check for perps
+        if (allProgramIds.includes(JUPITER_PERPS)) {
           hasPerpsToday = true
+          console.log('🪐 ✅ Found Jupiter perps')
         }
 
-        await new Promise(resolve => setTimeout(resolve, 100))
-      } catch {
+        await new Promise(resolve => setTimeout(resolve, 50))
+      } catch (err) {
+        console.warn('🪐 Error checking transaction:', err)
         continue
       }
     }
 
-    return { hasSwapToday, hasLimitOrderToday, hasPerpsToday }
+    console.log('🪐 Jupiter detection results:', { hasSwapToday, hasLimitOrderToday, hasPerpsToday, totalSwapsDetected })
+    return { hasSwapToday, hasLimitOrderToday, hasPerpsToday, totalSwapsDetected }
 
   } catch (error) {
-    console.error('Error checking Jupiter activity:', error)
-    return { hasSwapToday: false, hasLimitOrderToday: false, hasPerpsToday: false }
+    console.error('🪐 Error checking Jupiter activity:', error)
+    return { hasSwapToday: false, hasLimitOrderToday: false, hasPerpsToday: false, totalSwapsDetected: 0 }
   }
 }
 
@@ -278,17 +304,24 @@ export async function quickCheckJupiterSwaps(walletAddress: string): Promise<{
  * Check if wallet holds any Sanctum LSTs
  */
 export async function checkSanctumLST(walletAddress: string): Promise<boolean> {
-  // Common Sanctum LST mint addresses
-  const SANCTUM_LSTS = [
-    'INFwEDuiLRSGdRfiHAKvxqwg1J3CfLFsLWK3rTAJkNB', // INF
-    'bSo13r4TkiE4KumL71LsHTPpL2euBYLFx6h9HP3piy1', // bSOL
-    '7kbnvuGBxxj8AG9qp8Scn56muWGaRaFqxg1FsRp3PaFT', // stSOL (Lido)
-    'mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So',  // mSOL (Marinade)
-    'J1toso1uCk3RLmjorhTtrVwY9HJ7X8V9yYac6Y7kGCPn', // JitoSOL
-    'edge86g9cVz87xcpKpy3J77vbp4wYd9idEV562CCntt', // edgeSOL
-    'he1iusmfkpAdwvxLNGV8Y1iSbj4rUy6yMhEA3fotn9A', // hSOL
-    'Dso1bDeDjCQxTrWHqUUi63oBvV7Mdm6WaobLbQ7gnPQ',  // DSOL
-  ]
+  console.log('⭐ Checking Sanctum LST holdings for:', walletAddress)
+  
+  // Common Sanctum LST mint addresses with names
+  const SANCTUM_LSTS: { [mint: string]: string } = {
+    'INFp2k2GLVEA8Wvs4mEyDA1LBKHA3HfHx3X8pKNF4Qf': 'INF', // INF (infinity)
+    'bSo13r4TkiE4KumL71LsHTPpL2euBYLFx6h9HP3piy1': 'bSOL', // bSOL (Blaze)
+    '7kbnvuGBxxj8AG9qp8Scn56muWGaRaFqxg1FsRp3PaFT': 'stSOL', // stSOL (Lido)
+    'mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So': 'mSOL', // mSOL (Marinade)
+    'J1toso1uCk3RLmjorhTtrVwY9HJ7X8V9yYac6Y7kGCPn': 'JitoSOL', // JitoSOL
+    'edge86g9cVz87xcpKpy3J77vbp4wYd9idEV562CCntt': 'edgeSOL', // edgeSOL
+    'he1iusmfkpAdwvxLNGV8Y1iSbj4rUy6yMhEA3fotn9A': 'hSOL', // hSOL
+    'Dso1bDeDjCQxTrWHqUUi63oBvV7Mdm6WaobLbQ7gnPQ': 'DSOL', // DSOL
+    'LAinEtNLgpmCP9Rvsf5Hn8W6EhNiKLZQti1xfWMLy6X': 'laineSOL', // laineSOL
+    'jupSoLaHXQiZZTSfEWMTRRgpnyFm8f6sZdosWBjx93v': 'jupSOL', // jupSOL
+    'picobAEvs6w7QEknPce34wAE4gknZA9v5tTonnmHYdX': 'picoSOL', // picoSOL
+    'Comp4ssDzXcLeu2MnLuGNNFC4cmLPMng8qWHPvzAMU1h': 'compassSOL', // compassSOL
+    'BonK1YhkXEGLZzwtcvRTip3gAL9nCeQD7ppZBLXhtTs': 'bonkSOL', // bonkSOL
+  }
 
   try {
     const response = await fetch(HELIUS_RPC, {
@@ -308,20 +341,23 @@ export async function checkSanctumLST(walletAddress: string): Promise<boolean> {
 
     const data = await response.json()
     const accounts = data.result?.value || []
+    console.log('⭐ Found', accounts.length, 'token accounts')
 
     // Check if any account holds a Sanctum LST
     for (const account of accounts) {
       const mint = account.account?.data?.parsed?.info?.mint
       const amount = account.account?.data?.parsed?.info?.tokenAmount?.uiAmount || 0
       
-      if (mint && SANCTUM_LSTS.includes(mint) && amount > 0) {
+      if (mint && mint in SANCTUM_LSTS && amount > 0) {
+        console.log(`⭐ ✅ Found ${SANCTUM_LSTS[mint]}: ${amount}`)
         return true
       }
     }
 
+    console.log('⭐ No Sanctum LSTs found')
     return false
   } catch (error) {
-    console.error('Error checking Sanctum LST:', error)
+    console.error('⭐ Error checking Sanctum LST:', error)
     return false
   }
 }
