@@ -486,3 +486,72 @@ export async function checkSanctumLST(walletAddress: string): Promise<boolean> {
   }
 }
 
+/**
+ * Get Sanctum LST balance with symbol
+ * Returns the balance in SOL-equivalent terms (LSTs are ~1:1 with SOL)
+ */
+export async function getSanctumLSTBalance(walletAddress: string): Promise<{ balance: number; symbol: string } | null> {
+  // Sanctum LST mint addresses with names
+  const SANCTUM_LSTS: { [mint: string]: string } = {
+    'INFp2k2GLVEA8Wvs4mEyDA1LBKHA3HfHx3X8pKNF4Qf': 'INF',
+    'bSo13r4TkiE4KumL71LsHTPpL2euBYLFx6h9HP3piy1': 'bSOL',
+    '7kbnvuGBxxj8AG9qp8Scn56muWGaRaFqxg1FsRp3PaFT': 'stSOL',
+    'mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So': 'mSOL',
+    'J1toso1uCk3RLmjorhTtrVwY9HJ7X8V9yYac6Y7kGCPn': 'JitoSOL',
+    'jupSoLaHXQiZZTSfEWMTRRgpnyFm8f6sZdosWBjx93v': 'jupSOL',
+    '5oVNBeEEQvYi1cX3ir8Dx5n1P7pdxydbGF2X4TxVusJm': 'scnSOL',
+    'edge86g9cVz87xcpKpy3J77vbp4wYd9idEV562CCntt': 'edgeSOL',
+    'he1iusmfkpAdwvxLNGV8Y1iSbj4rUy6yMhEA3fotn9A': 'hSOL',
+    'Dso1bDeDjCQxTrWHqUUi63oBvV7Mdm6WaobLbQ7gnPQ': 'DSOL',
+    'LAinEtNLgpmCP9Rvsf5Hn8W6EhNiKLZQti1xfWMLy6X': 'laineSOL',
+    'picobAEvs6w7QEknPce34wAE4gknZA9v5tTonnmHYdX': 'picoSOL',
+    'Comp4ssDzXcLeu2MnLuGNNFC4cmLPMng8qWHPvzAMU1h': 'compassSOL',
+    'BonK1YhkXEGLZzwtcvRTip3gAL9nCeQD7ppZBLXhtTs': 'bonkSOL',
+    'strng7mqqc1MBJJV6vMzYbEqnwVGvKKGKedeCvtktWA': 'strongSOL',
+    'GEJpt3Wjmr628FqXxTgxMce1pLntcPV4uFi8ksxMyPQh': 'daoSOL',
+    'Bybit2vBJGhPF52GBdNaQfUJ6ZpThSgHBobjWZpLPb4B': 'bbSOL',
+    'vSoLxydx6akxyMD9XEcPvGYNGq6Nn66oqVb3UkGkei7': 'vSOL',
+    'pumpkinsEq8xENVZE6QgTS93EN4r9iKvNxNALS1ooyp': 'pumpkinSOL',
+    'phaseZSfPxTDBpiVb96H4XFSD8xHeHxZre5HerehBJG': 'phaseSOL',
+    'BgYgFYq4A9a2o5S1QbWkmYVFBh7LBQL8YvugdhieFg38': 'clockSOL',
+    'HUBsveNpjo5pWqNkH57QzxjQASdTVXcSK7bVKTSZtcSX': 'hubSOL',
+    'LSTxxxnJzKDFSLr4dUkPcmCf5VyryEqzPLz5j4bpxFp': 'LST',
+    'pathdXw4He1Xk3eX84pDdDZnGKEme3GivBamGCVPZ5a': 'pathSOL',
+    'rswnoHTUEPBdZmjFPxtBBB8WwwqaSsLLE4q8GCRCW3c': 'rswSOL',
+  }
+
+  try {
+    const response = await fetch(getRpcUrl(), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'getTokenAccountsByOwner',
+        params: [
+          walletAddress,
+          { programId: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA' },
+          { encoding: 'jsonParsed' }
+        ]
+      })
+    })
+
+    const data = await response.json()
+    const accounts = data.result?.value || []
+
+    for (const account of accounts) {
+      const mint = account.account?.data?.parsed?.info?.mint
+      const amount = account.account?.data?.parsed?.info?.tokenAmount?.uiAmount || 0
+      
+      if (mint && mint in SANCTUM_LSTS && amount > 0) {
+        return { balance: amount, symbol: SANCTUM_LSTS[mint] }
+      }
+    }
+
+    return null
+  } catch (error) {
+    console.error('Error getting Sanctum LST balance:', error)
+    return null
+  }
+}
+

@@ -9,7 +9,7 @@ import { useWallet, useConnection } from '@solana/wallet-adapter-react'
 import { PublicKey, ParsedAccountData } from '@solana/web3.js'
 import Link from 'next/link'
 import AirdropQuest from '@/components/AirdropQuest'
-import { checkSanctumLST } from '@/lib/jupiter-api'
+import { checkSanctumLST, getSanctumLSTBalance } from '@/lib/jupiter-api'
 
 const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'
 
@@ -17,8 +17,11 @@ interface PortfolioStats {
   totalValueUSD: number
   solBalance: number
   usdcBalance: number
+  lstBalance: number // Sanctum LST balance in SOL equivalent
+  lstSymbol: string
   activePositions: number
   totalPnL: number
+  totalPnLSOL: number // P&L in SOL terms
   pendingAirdrops: number
   unclaimedFees: number
   positionsByProtocol: {
@@ -43,12 +46,17 @@ export default function HomePage() {
     totalValueUSD: 0,
     solBalance: 0,
     usdcBalance: 0,
+    lstBalance: 0,
+    lstSymbol: '',
     activePositions: 0,
     totalPnL: 0,
+    totalPnLSOL: 0,
     pendingAirdrops: 3,
     unclaimedFees: 0,
     positionsByProtocol: { meteora: 0, sanctum: 0, jupiter: 0 }
   })
+  const [showPnLInSOL, setShowPnLInSOL] = useState(false)
+  const [initialInvestmentSOL, setInitialInvestmentSOL] = useState(5) // User's starting SOL amount
   const [solPriceUSD, setSolPriceUSD] = useState(190)
   const [recentActivity, setRecentActivity] = useState<RecentActivity[]>([])
   const [allTransactions, setAllTransactions] = useState<any[]>([])
@@ -235,13 +243,29 @@ export default function HomePage() {
       // This doesn't include unrealized gains/losses from active positions
       const realizedPnL = (totalWithdrawn + totalFees) - totalInvested
 
-      // Check for Sanctum LST holdings
+      // Check for Sanctum LST holdings and get balance
       let hasSanctumPosition = false
+      let lstBalance = 0
+      let lstSymbol = ''
       try {
-        hasSanctumPosition = await checkSanctumLST(walletAddress)
+        const lstData = await getSanctumLSTBalance(walletAddress)
+        if (lstData) {
+          hasSanctumPosition = true
+          lstBalance = lstData.balance
+          lstSymbol = lstData.symbol
+        }
       } catch (err) {
         console.warn('Could not check Sanctum LST:', err)
       }
+
+      // Calculate total portfolio value in SOL equivalent
+      // SOL balance + LST balance (1:1 with SOL) + USDC converted to SOL
+      const totalSOLEquivalent = solBalance + lstBalance + (usdcBalance / solPriceUSD)
+      
+      // Calculate P&L based on initial investment
+      // User can set their initial investment (default 5 SOL)
+      const pnlInSOL = totalSOLEquivalent - initialInvestmentSOL
+      const pnlInUSD = pnlInSOL * solPriceUSD
 
       // Debug logging
       console.log('📊 Position calculation:', {
@@ -255,10 +279,16 @@ export default function HomePage() {
         realizedPnL,
         nftAddresses: Array.from(nftOpenCounts.keys()).map(k => k.slice(0,8)),
         hasSanctumPosition,
+        lstBalance,
+        lstSymbol,
+        totalSOLEquivalent,
+        initialInvestmentSOL,
+        pnlInSOL,
+        pnlInUSD,
       })
 
-      const totalPnL = realizedPnL
-      const totalValueUSD = (solBalance * solPriceUSD) + usdcBalance
+      // Total value includes: SOL + USDC + LST (valued at SOL price)
+      const totalValueUSD = (solBalance * solPriceUSD) + usdcBalance + (lstBalance * solPriceUSD)
       
       // Calculate positions by protocol
       const meteoraPositions = activePositionCount
@@ -271,8 +301,11 @@ export default function HomePage() {
         totalValueUSD,
         solBalance,
         usdcBalance,
+        lstBalance,
+        lstSymbol,
         activePositions: totalPositions,
-        totalPnL,
+        totalPnL: pnlInUSD,
+        totalPnLSOL: pnlInSOL,
         pendingAirdrops: 3, // Meteora, Jupiter, Sanctum
         unclaimedFees: totalFees,
         positionsByProtocol: {
@@ -391,7 +424,10 @@ export default function HomePage() {
                 <p className="text-4xl font-bold text-white">
                   ${stats.totalValueUSD.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </p>
-                <div className="flex items-center gap-4 mt-3">
+                <p className="text-slate-500 text-sm mt-1">
+                  ≈ {(stats.totalValueUSD / solPriceUSD).toFixed(4)} SOL @ ${solPriceUSD.toFixed(2)}
+                </p>
+                <div className="flex items-center gap-3 mt-3 flex-wrap">
                   <div className="flex items-center gap-2 bg-slate-800/50 rounded-lg px-3 py-1.5">
                     <span className="text-lg">🟡</span>
                     <span className="text-slate-300 text-sm font-medium">{stats.solBalance.toFixed(4)} SOL</span>
@@ -401,15 +437,48 @@ export default function HomePage() {
                     <span className="text-lg">💵</span>
                     <span className="text-slate-300 text-sm font-medium">{stats.usdcBalance.toFixed(2)} USDC</span>
                   </div>
+                  {stats.lstBalance > 0 && (
+                    <div className="flex items-center gap-2 bg-purple-500/10 rounded-lg px-3 py-1.5 border border-purple-500/20">
+                      <span className="text-lg">⭐</span>
+                      <span className="text-purple-300 text-sm font-medium">{stats.lstBalance.toFixed(4)} {stats.lstSymbol}</span>
+                      <span className="text-purple-400 text-xs">(${(stats.lstBalance * solPriceUSD).toFixed(2)})</span>
+                    </div>
+                  )}
                 </div>
               </div>
 
               {/* P&L */}
               <div className="flex flex-col justify-center">
-                <p className="text-slate-400 text-sm font-medium mb-1">Total P&L</p>
-                <p className={`text-2xl font-bold ${stats.totalPnL >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                  {stats.totalPnL >= 0 ? '+' : ''}{stats.totalPnL.toFixed(2)} USD
-                </p>
+                <div className="flex items-center justify-between mb-1">
+                  <p className="text-slate-400 text-sm font-medium">Total P&L</p>
+                  <button
+                    onClick={() => setShowPnLInSOL(!showPnLInSOL)}
+                    className="text-xs text-cyan-400 hover:text-cyan-300 transition-colors"
+                  >
+                    Show in {showPnLInSOL ? 'USD' : 'SOL'}
+                  </button>
+                </div>
+                {showPnLInSOL ? (
+                  <p className={`text-2xl font-bold ${stats.totalPnLSOL >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                    {stats.totalPnLSOL >= 0 ? '+' : ''}{stats.totalPnLSOL.toFixed(4)} SOL
+                  </p>
+                ) : (
+                  <p className={`text-2xl font-bold ${stats.totalPnL >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                    {stats.totalPnL >= 0 ? '+' : ''}${Math.abs(stats.totalPnL).toFixed(2)}
+                  </p>
+                )}
+                <div className="flex items-center gap-2 mt-2">
+                  <span className="text-slate-500 text-xs">Initial:</span>
+                  <input
+                    type="number"
+                    value={initialInvestmentSOL}
+                    onChange={(e) => setInitialInvestmentSOL(parseFloat(e.target.value) || 0)}
+                    className="w-16 bg-slate-800/50 text-slate-300 text-xs rounded px-2 py-1 border border-slate-700/50 focus:border-cyan-500/50 focus:outline-none"
+                    step="0.1"
+                    min="0"
+                  />
+                  <span className="text-slate-500 text-xs">SOL</span>
+                </div>
               </div>
             </div>
           </div>
