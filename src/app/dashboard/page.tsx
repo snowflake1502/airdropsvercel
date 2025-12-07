@@ -20,6 +20,7 @@ interface PortfolioStats {
   lstBalance: number // Raw LST token balance
   lstSolEquivalent: number // LST value in SOL terms (using exchange rate)
   lstSymbol: string
+  meteoraLPValueUSD: number // Estimated Meteora LP position value
   activePositions: number
   totalPnL: number
   totalPnLSOL: number // P&L in SOL terms
@@ -50,6 +51,7 @@ export default function HomePage() {
     lstBalance: 0,
     lstSolEquivalent: 0,
     lstSymbol: '',
+    meteoraLPValueUSD: 0,
     activePositions: 0,
     totalPnL: 0,
     totalPnLSOL: 0,
@@ -262,9 +264,33 @@ export default function HomePage() {
         console.warn('Could not check Sanctum LST:', err)
       }
 
+      // Estimate Meteora LP position value from transaction history
+      // For active positions, estimate value based on deposits minus withdrawals
+      let meteoraLPValueUSD = 0
+      if (activePositionCount > 0) {
+        // Calculate the remaining value in active positions
+        // If you deposited $500 and withdrew $200, position value is ~$300
+        const depositsForActivePositions = opens
+          .filter(tx => {
+            // Check if this position is still active
+            const nft = tx.position_nft_address
+            if (!nft) return true // No NFT = active
+            const closedCount = nftCloseCounts.get(nft) || 0
+            const openedCount = nftOpenCounts.get(nft) || 0
+            return openedCount > closedCount
+          })
+          .reduce((sum, tx) => sum + Math.abs(parseFloat(tx.total_usd) || 0), 0)
+        
+        // Active position value = deposits that haven't been withdrawn
+        // This is an estimate - actual value depends on current pool state
+        meteoraLPValueUSD = depositsForActivePositions
+        console.log('🌊 Estimated Meteora LP value:', meteoraLPValueUSD)
+      }
+
       // Calculate total portfolio value in SOL equivalent
-      // SOL balance + LST balance (using actual exchange rate) + USDC converted to SOL
-      const totalSOLEquivalent = solBalance + lstSolEquivalent + (usdcBalance / solPriceUSD)
+      // SOL balance + LST balance + USDC + Meteora LP positions
+      const meteoraLPValueSOL = meteoraLPValueUSD / solPriceUSD
+      const totalSOLEquivalent = solBalance + lstSolEquivalent + (usdcBalance / solPriceUSD) + meteoraLPValueSOL
       
       // Calculate P&L based on initial investment
       // User can set their initial investment (default 5 SOL)
@@ -291,8 +317,8 @@ export default function HomePage() {
         pnlInUSD,
       })
 
-      // Total value includes: SOL + USDC + LST (using actual exchange rate)
-      const totalValueUSD = (solBalance * solPriceUSD) + usdcBalance + (lstSolEquivalent * solPriceUSD)
+      // Total value includes: SOL + USDC + LST + Meteora LP positions
+      const totalValueUSD = (solBalance * solPriceUSD) + usdcBalance + (lstSolEquivalent * solPriceUSD) + meteoraLPValueUSD
       
       // Calculate positions by protocol
       const meteoraPositions = activePositionCount
@@ -308,6 +334,7 @@ export default function HomePage() {
         lstBalance,
         lstSolEquivalent,
         lstSymbol,
+        meteoraLPValueUSD,
         activePositions: totalPositions,
         totalPnL: pnlInUSD,
         totalPnLSOL: pnlInSOL,
@@ -448,6 +475,15 @@ export default function HomePage() {
                       <span className="text-purple-300 text-sm font-medium">{stats.lstBalance.toFixed(4)} {stats.lstSymbol}</span>
                       <span className="text-purple-400 text-xs">
                         (≈{stats.lstSolEquivalent.toFixed(4)} SOL = ${(stats.lstSolEquivalent * solPriceUSD).toFixed(2)})
+                      </span>
+                    </div>
+                  )}
+                  {stats.meteoraLPValueUSD > 0 && (
+                    <div className="flex items-center gap-2 bg-cyan-500/10 rounded-lg px-3 py-1.5 border border-cyan-500/20">
+                      <span className="text-lg">🌊</span>
+                      <span className="text-cyan-300 text-sm font-medium">Meteora LP</span>
+                      <span className="text-cyan-400 text-xs">
+                        (≈${stats.meteoraLPValueUSD.toFixed(2)})
                       </span>
                     </div>
                   )}
