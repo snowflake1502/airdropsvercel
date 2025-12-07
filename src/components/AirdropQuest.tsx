@@ -237,7 +237,8 @@ const generateDailyTasks = (activityStatus: ActivityStatus): DailyTask[] => {
   const dayOfWeek = getDayOfWeek()
   const tasks: DailyTask[] = []
   
-  // Meteora - always active if you have a position
+  // === METEORA TASKS ===
+  // Meteora LP - always show (core daily task)
   const meteoraLp = TASK_DEFINITIONS['meteora-lp']
   tasks.push({
     id: 'meteora-lp',
@@ -246,28 +247,8 @@ const generateDailyTasks = (activityStatus: ActivityStatus): DailyTask[] => {
     autoDetected: activityStatus.hasActivePosition,
   })
   
-  // Rotate other tasks by day
-  if (dayOfWeek === 1 || dayOfWeek === 4) { // Mon, Thu - Jupiter day
-    const jupSwap = TASK_DEFINITIONS['jupiter-swap']
-    tasks.push({
-      id: 'jupiter-swap',
-      ...jupSwap,
-      completed: false,
-      autoDetected: false,
-    })
-  }
-  
-  if (dayOfWeek === 2 || dayOfWeek === 5) { // Tue, Fri - Sanctum day
-    const sanctumLst = TASK_DEFINITIONS['sanctum-lst']
-    tasks.push({
-      id: 'sanctum-lst',
-      ...sanctumLst,
-      completed: false,
-      autoDetected: false,
-    })
-  }
-  
-  if (dayOfWeek === 3) { // Wed - claim day
+  // Claim fees - show on Wed and Sat (fee claim days)
+  if (dayOfWeek === 3 || dayOfWeek === 6) {
     const meteoraFees = TASK_DEFINITIONS['meteora-fees']
     tasks.push({
       id: 'meteora-fees',
@@ -277,7 +258,51 @@ const generateDailyTasks = (activityStatus: ActivityStatus): DailyTask[] => {
     })
   }
   
-  if (dayOfWeek === 6) { // Sat - review day
+  // === JUPITER TASKS ===
+  // Jupiter swap - every day (easy points)
+  const jupSwap = TASK_DEFINITIONS['jupiter-swap']
+  tasks.push({
+    id: 'jupiter-swap',
+    ...jupSwap,
+    completed: false,
+    autoDetected: false,
+  })
+  
+  // Jupiter limit order - Mon, Wed, Fri
+  if (dayOfWeek === 1 || dayOfWeek === 3 || dayOfWeek === 5) {
+    const jupLimit = TASK_DEFINITIONS['jupiter-limit']
+    tasks.push({
+      id: 'jupiter-limit',
+      ...jupLimit,
+      completed: false,
+      autoDetected: false,
+    })
+  }
+  
+  // Jupiter perps - Tue, Thu, Sat (for higher risk tolerance days)
+  if (dayOfWeek === 2 || dayOfWeek === 4 || dayOfWeek === 6) {
+    const jupPerp = TASK_DEFINITIONS['jupiter-perp']
+    tasks.push({
+      id: 'jupiter-perp',
+      ...jupPerp,
+      completed: false,
+      autoDetected: false,
+    })
+  }
+  
+  // === SANCTUM TASKS ===
+  // Sanctum LST - every day (passive holding)
+  const sanctumLst = TASK_DEFINITIONS['sanctum-lst']
+  tasks.push({
+    id: 'sanctum-lst',
+    ...sanctumLst,
+    completed: false,
+    autoDetected: false,
+  })
+  
+  // === WEEKLY TASKS ===
+  // Weekly review - Saturday
+  if (dayOfWeek === 6) {
     const weeklyReview = TASK_DEFINITIONS['weekly-review']
     tasks.push({
       id: 'weekly-review',
@@ -287,7 +312,8 @@ const generateDailyTasks = (activityStatus: ActivityStatus): DailyTask[] => {
     })
   }
   
-  if (dayOfWeek === 0) { // Sun - rest day
+  // Weekly planning - Sunday
+  if (dayOfWeek === 0) {
     const weeklyPlan = TASK_DEFINITIONS['weekly-plan']
     tasks.push({
       id: 'weekly-plan',
