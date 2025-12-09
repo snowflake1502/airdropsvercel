@@ -264,33 +264,41 @@ export default function HomePage() {
         console.warn('Could not check Sanctum LST:', err)
       }
 
-      // Estimate Meteora LP position value from transaction history
-      // For active positions: value = deposits - withdrawals per NFT
+      // Fetch real-time Meteora LP position values from API
       let meteoraLPValueUSD = 0
+      let meteoraUnclaimedFees = 0
       if (activePositionCount > 0) {
-        // For each NFT with net active positions, calculate remaining value
-        nftOpenCounts.forEach((openCount, nft) => {
-          const closeCount = nftCloseCounts.get(nft) || 0
-          const netPositions = openCount - closeCount
-          
-          if (netPositions > 0) {
-            // Calculate deposits for this NFT
-            const deposits = opens
-              .filter(tx => tx.position_nft_address === nft)
-              .reduce((sum, tx) => sum + Math.abs(parseFloat(tx.total_usd) || 0), 0)
-            
-            // Calculate withdrawals for this NFT
-            const withdrawals = closes
-              .filter(tx => tx.position_nft_address === nft)
-              .reduce((sum, tx) => sum + Math.abs(parseFloat(tx.total_usd) || 0), 0)
-            
-            // Net value = deposits - withdrawals
-            const netValue = deposits - withdrawals
-            console.log(`🌊 NFT ${nft.slice(0, 8)}...: deposits=$${deposits.toFixed(2)}, withdrawals=$${withdrawals.toFixed(2)}, net=$${netValue.toFixed(2)}`)
-            meteoraLPValueUSD += Math.max(0, netValue) // Don't count negative (already withdrawn more than deposited)
+        try {
+          const meteoraResponse = await fetch(
+            `/api/meteora/positions-value?walletAddress=${walletAddress}&userId=${user.id}`
+          )
+          if (meteoraResponse.ok) {
+            const meteoraData = await meteoraResponse.json()
+            if (meteoraData.success) {
+              meteoraLPValueUSD = meteoraData.totalValueUSD || 0
+              meteoraUnclaimedFees = meteoraData.totalUnclaimedFeesUSD || 0
+              console.log(`🌊 Real-time Meteora LP value: $${meteoraLPValueUSD.toFixed(2)} (unclaimed fees: $${meteoraUnclaimedFees.toFixed(2)})`)
+            }
           }
-        })
-        console.log('🌊 Total Meteora LP value:', meteoraLPValueUSD.toFixed(2))
+        } catch (meteoraError) {
+          console.warn('Could not fetch real-time Meteora values, falling back to estimate:', meteoraError)
+          // Fallback to historical estimate if API fails
+          nftOpenCounts.forEach((openCount, nft) => {
+            const closeCount = nftCloseCounts.get(nft) || 0
+            const netPositions = openCount - closeCount
+            
+            if (netPositions > 0) {
+              const deposits = opens
+                .filter(tx => tx.position_nft_address === nft)
+                .reduce((sum, tx) => sum + Math.abs(parseFloat(tx.total_usd) || 0), 0)
+              const withdrawals = closes
+                .filter(tx => tx.position_nft_address === nft)
+                .reduce((sum, tx) => sum + Math.abs(parseFloat(tx.total_usd) || 0), 0)
+              meteoraLPValueUSD += Math.max(0, deposits - withdrawals)
+            }
+          })
+          console.log('🌊 Fallback Meteora LP estimate:', meteoraLPValueUSD.toFixed(2))
+        }
       }
 
       // Calculate total portfolio value in SOL equivalent
@@ -345,7 +353,7 @@ export default function HomePage() {
         totalPnL: pnlInUSD,
         totalPnLSOL: pnlInSOL,
         pendingAirdrops: 3, // Meteora, Jupiter, Sanctum
-        unclaimedFees: totalFees,
+        unclaimedFees: meteoraUnclaimedFees > 0 ? meteoraUnclaimedFees : totalFees, // Use real-time unclaimed fees if available
         positionsByProtocol: {
           meteora: meteoraPositions,
           sanctum: sanctumPositions,
