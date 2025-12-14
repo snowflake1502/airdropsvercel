@@ -46,6 +46,9 @@ export async function fetchMeteoraPositionValue(
   positionAddress: string
 ): Promise<MeteoraPositionValue | null> {
   try {
+    // #region agent log
+    console.log('[DEBUG-A] Fetching position:', JSON.stringify({positionAddress}));
+    // #endregion
     // Step 1: Get position data
     const positionResponse = await fetch(
       `https://dlmm-api.meteora.ag/position/${positionAddress}`,
@@ -105,6 +108,10 @@ export async function fetchMeteoraPositionValue(
         const tokenXDecimals = pairData.mint_x_decimals || 9
         const tokenYDecimals = pairData.mint_y_decimals || 6
         
+        // #region agent log
+        console.log('[DEBUG-B] Raw API amounts:', JSON.stringify({positionAddress,raw_total_x_amount:specificPosition.position_data?.total_x_amount,raw_total_y_amount:specificPosition.position_data?.total_y_amount,tokenXDecimals,tokenYDecimals,pairName:pairData.name,mint_x:pairData.mint_x,mint_y:pairData.mint_y}));
+        // #endregion
+        
         tokenXAmount = Number(specificPosition.position_data?.total_x_amount || 0) / Math.pow(10, tokenXDecimals)
         tokenYAmount = Number(specificPosition.position_data?.total_y_amount || 0) / Math.pow(10, tokenYDecimals)
         unclaimedFeeX = Number(specificPosition.position_data?.fee_x || 0) / Math.pow(10, tokenXDecimals)
@@ -130,6 +137,10 @@ export async function fetchMeteoraPositionValue(
     // Get current SOL price from pair data (current_price is USDC per SOL for SOL-USDC pools)
     const currentPrice = Number(pairData.current_price || 132) // SOL price in USDC
 
+    // #region agent log
+    console.log('[DEBUG-C] Price calc inputs:', JSON.stringify({positionAddress,currentPrice,tokenXMint,tokenYMint,tokenXSymbol,tokenYSymbol,tokenXAmount,tokenYAmount}));
+    // #endregion
+
     let tokenXPrice = 1
     let tokenYPrice = 1
 
@@ -152,6 +163,10 @@ export async function fetchMeteoraPositionValue(
     const tokenYValueUSD = tokenYAmount * tokenYPrice
     const totalValueUSD = tokenXValueUSD + tokenYValueUSD
     const unclaimedFeesUSD = (unclaimedFeeX * tokenXPrice) + (unclaimedFeeY * tokenYPrice)
+
+    // #region agent log
+    console.log('[DEBUG-D] Final calc:', JSON.stringify({positionAddress,tokenXPrice,tokenYPrice,tokenXAmount,tokenYAmount,tokenXValueUSD,tokenYValueUSD,totalValueUSD,unclaimedFeesUSD}));
+    // #endregion
 
     return {
       positionAddress,
@@ -230,4 +245,6 @@ export async function fetchMeteoraPositionsValues(
     errors,
   }
 }
+
+
 

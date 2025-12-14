@@ -83,6 +83,10 @@ export async function GET(request: NextRequest) {
 
     console.log(`🌊 Found ${activePositionAddresses.length} active positions`)
 
+    // #region agent log
+    console.log('[DEBUG-A] Active positions:', JSON.stringify({count:activePositionAddresses.length,addresses:activePositionAddresses,transactions:transactions}));
+    // #endregion
+
     if (activePositionAddresses.length === 0) {
       return NextResponse.json({
         success: true,
@@ -97,6 +101,10 @@ export async function GET(request: NextRequest) {
     const result = await fetchMeteoraPositionsValues(activePositionAddresses)
 
     console.log(`🌊 Fetched ${result.positions.length} positions with total value: $${result.totalValueUSD.toFixed(2)}`)
+
+    // #region agent log
+    console.log('[DEBUG-FINAL] API result:', JSON.stringify({totalValueUSD:result.totalValueUSD,totalUnclaimedFeesUSD:result.totalUnclaimedFeesUSD,positionsCount:result.positions.length,positions:result.positions.map(p=>({addr:p.positionAddress,pair:p.pairName,valueUSD:p.totalValueUSD,fees:p.unclaimedFeesUSD}))}));
+    // #endregion
 
     return NextResponse.json({
       success: true,
@@ -116,4 +124,6 @@ export async function GET(request: NextRequest) {
     )
   }
 }
+
+
 
