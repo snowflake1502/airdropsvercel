@@ -2,11 +2,6 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { fetchMeteoraPositionsValues } from '@/lib/meteora-positions'
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-)
-
 /**
  * GET /api/meteora/positions-value
  * Fetches real-time Meteora LP position values for a wallet
@@ -28,7 +23,20 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    console.log(`🌊 Fetching Meteora positions for wallet: ${walletAddress}`)
+    // Get authorization header from request (for RLS)
+    const authHeader = request.headers.get('authorization')
+    
+    // Create Supabase client - use auth header if available for RLS
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
+    const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    
+    const supabase = authHeader 
+      ? createClient(supabaseUrl, supabaseKey, {
+          global: { headers: { Authorization: authHeader } },
+        })
+      : createClient(supabaseUrl, supabaseKey)
+
+    console.log(`🌊 Fetching Meteora positions for wallet: ${walletAddress} (auth: ${authHeader ? 'yes' : 'no'})`)
 
     // Step 1: Get all position transactions from database
     const { data: transactions, error } = await supabase

@@ -269,8 +269,15 @@ export default function HomePage() {
       let meteoraUnclaimedFees = 0
       if (activePositionCount > 0) {
         try {
+          // Get auth session for API call (needed for RLS)
+          const { data: { session } } = await supabase.auth.getSession()
+          const headers: HeadersInit = session?.access_token 
+            ? { 'Authorization': `Bearer ${session.access_token}` }
+            : {}
+          
           const meteoraResponse = await fetch(
-            `/api/meteora/positions-value?walletAddress=${walletAddress}&userId=${user.id}`
+            `/api/meteora/positions-value?walletAddress=${walletAddress}&userId=${user.id}`,
+            { headers }
           )
           if (meteoraResponse.ok) {
             const meteoraData = await meteoraResponse.json()
