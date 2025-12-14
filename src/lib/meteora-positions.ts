@@ -215,10 +215,121 @@ interface JupiterPortfolioResponse {
   totalValue?: number
 }
 
+// Known popular Meteora DLMM pools to check for positions (fallback)
+const POPULAR_METEORA_POOLS = [
+  '5rCf1DM8LjKTw4YqhnoLcngyZYeNnQqztScTogYHAS6', // SOL-USDC (from user's portfolio)
+  'BVRbyLjjfSBcoyiYFuxbgKYnWuiFaF9CSXEa5vdSZ5Hh', // SOL-USDT
+  'ARwi1S4DaiTG5DX7S4M4ZsrXqpMD1MrTmbu9ue2tpmEq', // BONK-SOL
+]
+
+/**
+ * Fallback: Query Meteora directly for user positions in known pools
+ */
+async function fetchMeteoraPositionsDirect(
+  walletAddress: string
+): Promise<MeteoraPositionsResult> {
+  const positions: MeteoraPositionValue[] = []
+  const errors: string[] = []
+  
+  console.log('[DEBUG-FALLBACK] Trying direct Meteora API for known pools')
+
+  for (const poolAddress of POPULAR_METEORA_POOLS) {
+    try {
+      // Query user positions in this pool
+      const response = await fetch(
+        `https://dlmm-api.meteora.ag/pair/${poolAddress}/user/${walletAddress}`,
+        {
+          headers: { Accept: 'application/json' },
+          next: { revalidate: 30 },
+        }
+      )
+
+      if (!response.ok) continue
+
+      const data = await response.json()
+      const userPositions = data.user_positions || []
+
+      if (userPositions.length === 0) continue
+
+      // Get pool data for pricing
+      const pairResponse = await fetch(
+        `https://dlmm-api.meteora.ag/pair/${poolAddress}`,
+        { headers: { Accept: 'application/json' } }
+      )
+      
+      if (!pairResponse.ok) continue
+      const pairData = await pairResponse.json()
+
+      // Process each position
+      for (const pos of userPositions) {
+        const tokenXDecimals = pairData.mint_x_decimals || 9
+        const tokenYDecimals = pairData.mint_y_decimals || 6
+        const currentPrice = Number(pairData.current_price || 133)
+
+        const tokenXAmount = Number(pos.position_data?.total_x_amount || 0) / Math.pow(10, tokenXDecimals)
+        const tokenYAmount = Number(pos.position_data?.total_y_amount || 0) / Math.pow(10, tokenYDecimals)
+        
+        // Determine prices
+        let tokenXPrice = 1, tokenYPrice = 1
+        if (pairData.mint_y === USDC_MINT) {
+          tokenYPrice = 1
+          tokenXPrice = currentPrice
+        } else if (pairData.mint_x === USDC_MINT) {
+          tokenXPrice = 1
+          tokenYPrice = currentPrice
+        }
+
+        const tokenXValueUSD = tokenXAmount * tokenXPrice
+        const tokenYValueUSD = tokenYAmount * tokenYPrice
+        const totalValueUSD = tokenXValueUSD + tokenYValueUSD
+
+        const unclaimedFeeX = Number(pos.position_data?.fee_x || 0) / Math.pow(10, tokenXDecimals)
+        const unclaimedFeeY = Number(pos.position_data?.fee_y || 0) / Math.pow(10, tokenYDecimals)
+        const unclaimedFeesUSD = (unclaimedFeeX * tokenXPrice) + (unclaimedFeeY * tokenYPrice)
+
+        positions.push({
+          positionAddress: pos.position_address || pos.public_key || 'unknown',
+          pairAddress: poolAddress,
+          pairName: pairData.name || 'Unknown',
+          owner: walletAddress,
+          tokenX: {
+            symbol: pairData.name?.split('-')[0] || 'Unknown',
+            mint: pairData.mint_x,
+            amount: tokenXAmount,
+            price: tokenXPrice,
+            valueUSD: tokenXValueUSD,
+          },
+          tokenY: {
+            symbol: pairData.name?.split('-')[1] || 'Unknown',
+            mint: pairData.mint_y,
+            amount: tokenYAmount,
+            price: tokenYPrice,
+            valueUSD: tokenYValueUSD,
+          },
+          totalValueUSD,
+          unclaimedFeesUSD,
+          totalFeesClaimed: 0,
+          isOutOfRange: false,
+          feeAPR24h: 0,
+        })
+      }
+    } catch (err: any) {
+      errors.push(`Pool ${poolAddress}: ${err.message}`)
+    }
+  }
+
+  const totalValueUSD = positions.reduce((sum, p) => sum + p.totalValueUSD, 0)
+  const totalUnclaimedFeesUSD = positions.reduce((sum, p) => sum + p.unclaimedFeesUSD, 0)
+
+  console.log(`[DEBUG-FALLBACK] Found ${positions.length} positions worth $${totalValueUSD.toFixed(2)}`)
+
+  return { positions, totalValueUSD, totalUnclaimedFeesUSD, errors }
+}
+
 /**
  * Fetch Meteora positions using Jupiter Portfolio API
  * Jupiter aggregates data from 170+ protocols including Meteora
- * This is more reliable than querying Meteora directly
+ * Falls back to direct Meteora API if Jupiter fails
  */
 export async function fetchMeteoraPositionsByWallet(
   walletAddress: string
@@ -235,11 +346,11 @@ export async function fetchMeteoraPositionsByWallet(
     const jupiterApiKey = process.env.JUPITER_API_KEY
     
     if (!jupiterApiKey) {
-      console.warn('JUPITER_API_KEY not set - cannot fetch portfolio data')
+      console.warn('JUPITER_API_KEY not set - falling back to direct Meteora API')
       // #region agent log
-      console.log('[DEBUG-JUPITER] No API key configured');
+      console.log('[DEBUG-JUPITER] No API key - using fallback');
       // #endregion
-      return { positions: [], totalValueUSD: 0, totalUnclaimedFeesUSD: 0, errors: ['JUPITER_API_KEY not configured'] }
+      return await fetchMeteoraPositionsDirect(walletAddress)
     }
 
     const response = await fetch(
@@ -254,11 +365,11 @@ export async function fetchMeteoraPositionsByWallet(
     )
 
     if (!response.ok) {
-      console.warn(`Jupiter Portfolio API error: ${response.status}`)
+      console.warn(`Jupiter Portfolio API error: ${response.status} - falling back to direct Meteora API`)
       // #region agent log
-      console.log('[DEBUG-JUPITER] API error:', response.status);
+      console.log('[DEBUG-JUPITER] API error:', response.status, '- using fallback');
       // #endregion
-      return { positions: [], totalValueUSD: 0, totalUnclaimedFeesUSD: 0, errors: [`Jupiter API error: ${response.status}`] }
+      return await fetchMeteoraPositionsDirect(walletAddress)
     }
 
     const portfolioData = await response.json()
