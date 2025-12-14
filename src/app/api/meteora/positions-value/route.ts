@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
-import { fetchMeteoraPositionsValues } from '@/lib/meteora-positions'
+import { fetchMeteoraPositionsByWallet } from '@/lib/meteora-positions'
 
 /**
  * GET /api/meteora/positions-value
@@ -38,90 +38,8 @@ export async function GET(request: NextRequest) {
 
     console.log(`🌊 Fetching Meteora positions for wallet: ${walletAddress} (auth: ${authHeader ? 'yes' : 'no'})`)
 
-    // Step 1: Get all position transactions from database
-    const { data: transactions, error } = await supabase
-      .from('position_transactions')
-      .select('position_nft_address, tx_type, pool_address')
-      .eq('user_id', userId)
-      .eq('wallet_address', walletAddress)
-      .not('position_nft_address', 'is', null)
-
-    // #region agent log
-    console.log('[DEBUG-DB] Database query result:', JSON.stringify({error: error?.message, transactionCount: transactions?.length, userId, walletAddress}));
-    // #endregion
-
-    if (error) {
-      throw new Error(`Database error: ${error.message}`)
-    }
-
-    if (!transactions || transactions.length === 0) {
-      // #region agent log
-      console.log('[DEBUG-DB] No transactions found - returning early');
-      // #endregion
-      return NextResponse.json({
-        success: true,
-        totalValueUSD: 0,
-        totalUnclaimedFeesUSD: 0,
-        positions: [],
-        message: 'No Meteora positions found',
-      })
-    }
-
-    // #region agent log
-    console.log('[DEBUG-TX] Raw transactions from DB:', JSON.stringify(transactions));
-    // #endregion
-
-    // Step 2: Determine active positions (opens - closes)
-    const nftOpenCounts = new Map<string, number>()
-    const nftCloseCounts = new Map<string, number>()
-
-    transactions.forEach((tx) => {
-      if (tx.position_nft_address) {
-        if (tx.tx_type === 'position_open') {
-          nftOpenCounts.set(
-            tx.position_nft_address,
-            (nftOpenCounts.get(tx.position_nft_address) || 0) + 1
-          )
-        } else if (tx.tx_type === 'position_close') {
-          nftCloseCounts.set(
-            tx.position_nft_address,
-            (nftCloseCounts.get(tx.position_nft_address) || 0) + 1
-          )
-        }
-      }
-    })
-    
-    // #region agent log
-    console.log('[DEBUG-COUNTS] Open/Close counts:', JSON.stringify({openCounts: Object.fromEntries(nftOpenCounts), closeCounts: Object.fromEntries(nftCloseCounts)}));
-    // #endregion
-
-    // Get active position addresses
-    const activePositionAddresses: string[] = []
-    nftOpenCounts.forEach((openCount, nftAddr) => {
-      const closeCount = nftCloseCounts.get(nftAddr) || 0
-      if (openCount > closeCount) {
-        activePositionAddresses.push(nftAddr)
-      }
-    })
-
-    console.log(`🌊 Found ${activePositionAddresses.length} active positions`)
-
-    // #region agent log
-    console.log('[DEBUG-A] Active positions:', JSON.stringify({count:activePositionAddresses.length,addresses:activePositionAddresses,transactions:transactions}));
-    // #endregion
-
-    if (activePositionAddresses.length === 0) {
-      return NextResponse.json({
-        success: true,
-        totalValueUSD: 0,
-        totalUnclaimedFeesUSD: 0,
-        positions: [],
-        message: 'No active Meteora positions',
-      })
-    }
-
-    // Step 3: Fetch real-time values from Meteora API
-    const result = await fetchMeteoraPositionsValues(activePositionAddresses)
+    // Query Meteora API directly by wallet address - more reliable than stored position addresses
+    const result = await fetchMeteoraPositionsByWallet(walletAddress)
 
     console.log(`🌊 Fetched ${result.positions.length} positions with total value: $${result.totalValueUSD.toFixed(2)}`)
 

@@ -200,7 +200,77 @@ export async function fetchMeteoraPositionValue(
 }
 
 /**
+ * Fetch all Meteora positions for a wallet address directly from Meteora API
+ * This is more reliable than querying by stored position addresses
+ */
+export async function fetchMeteoraPositionsByWallet(
+  walletAddress: string
+): Promise<MeteoraPositionsResult> {
+  const positions: MeteoraPositionValue[] = []
+  const errors: string[] = []
+
+  try {
+    // #region agent log
+    console.log('[DEBUG-WALLET] Fetching positions by wallet:', walletAddress);
+    // #endregion
+
+    // Query Meteora for all positions owned by this wallet
+    const response = await fetch(
+      `https://dlmm-api.meteora.ag/position/find_by_user?owner=${walletAddress}`,
+      {
+        headers: { Accept: 'application/json' },
+        next: { revalidate: 30 },
+      }
+    )
+
+    if (!response.ok) {
+      console.warn(`Meteora user positions API error: ${response.status}`)
+      return { positions: [], totalValueUSD: 0, totalUnclaimedFeesUSD: 0, errors: [`API error: ${response.status}`] }
+    }
+
+    const userPositions = await response.json()
+    
+    // #region agent log
+    console.log('[DEBUG-WALLET] Found positions:', JSON.stringify({ count: userPositions?.length || 0 }));
+    // #endregion
+
+    if (!userPositions || userPositions.length === 0) {
+      return { positions: [], totalValueUSD: 0, totalUnclaimedFeesUSD: 0, errors: [] }
+    }
+
+    // Process each position
+    for (const pos of userPositions) {
+      try {
+        const positionValue = await fetchMeteoraPositionValue(pos.address || pos.public_key)
+        if (positionValue) {
+          positions.push(positionValue)
+        }
+      } catch (err: any) {
+        errors.push(`Failed to fetch position ${pos.address}: ${err.message}`)
+      }
+    }
+  } catch (err: any) {
+    errors.push(`Failed to fetch wallet positions: ${err.message}`)
+  }
+
+  const totalValueUSD = positions.reduce((sum, p) => sum + p.totalValueUSD, 0)
+  const totalUnclaimedFeesUSD = positions.reduce((sum, p) => sum + p.unclaimedFeesUSD, 0)
+
+  // #region agent log
+  console.log('[DEBUG-WALLET] Final result:', JSON.stringify({ totalValueUSD, totalUnclaimedFeesUSD, positionCount: positions.length }));
+  // #endregion
+
+  return {
+    positions,
+    totalValueUSD,
+    totalUnclaimedFeesUSD,
+    errors,
+  }
+}
+
+/**
  * Fetch real-time values for multiple Meteora positions
+ * @deprecated Use fetchMeteoraPositionsByWallet instead for more reliable results
  */
 export async function fetchMeteoraPositionsValues(
   positionAddresses: string[]
