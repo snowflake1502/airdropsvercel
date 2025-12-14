@@ -72,12 +72,14 @@ const nextConfig: NextConfig = {
     // TODO: Fix TypeScript errors before production
     ignoreBuildErrors: true,
   },
-  // Explicitly expose env vars to client-side (required for NEXT_PUBLIC_ vars)
+  // Explicitly expose env vars
   // Use manually parsed values if dotenv didn't work
   env: {
     NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL || envVars.NEXT_PUBLIC_SUPABASE_URL || '',
     NEXT_PUBLIC_SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || envVars.NEXT_PUBLIC_SUPABASE_ANON_KEY || '',
     NEXT_PUBLIC_SOLANA_RPC_URL: process.env.NEXT_PUBLIC_SOLANA_RPC_URL || envVars.NEXT_PUBLIC_SOLANA_RPC_URL || '',
+    // Server-side env vars (needed for API routes)
+    JUPITER_API_KEY: process.env.JUPITER_API_KEY || '',
   },
 };
 
