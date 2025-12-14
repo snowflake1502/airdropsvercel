@@ -52,6 +52,10 @@ export async function GET(request: NextRequest) {
       })
     }
 
+    // #region agent log
+    console.log('[DEBUG-TX] Raw transactions from DB:', JSON.stringify(transactions));
+    // #endregion
+
     // Step 2: Determine active positions (opens - closes)
     const nftOpenCounts = new Map<string, number>()
     const nftCloseCounts = new Map<string, number>()
@@ -71,6 +75,10 @@ export async function GET(request: NextRequest) {
         }
       }
     })
+    
+    // #region agent log
+    console.log('[DEBUG-COUNTS] Open/Close counts:', JSON.stringify({openCounts: Object.fromEntries(nftOpenCounts), closeCounts: Object.fromEntries(nftCloseCounts)}));
+    // #endregion
 
     // Get active position addresses
     const activePositionAddresses: string[] = []
