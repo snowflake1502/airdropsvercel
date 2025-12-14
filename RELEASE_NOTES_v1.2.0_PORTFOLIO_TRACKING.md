@@ -125,3 +125,5 @@ CREATE TABLE daily_tasks (
 **Previous Release:** v1.1.0 (Meteora Tracking)  
 **Next Planned:** v1.3.0 (Real-time LP value via Meteora API)
 
+
+

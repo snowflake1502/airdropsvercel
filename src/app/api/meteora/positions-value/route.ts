@@ -36,6 +36,15 @@ export async function GET(request: NextRequest) {
         })
       : createClient(supabaseUrl, supabaseKey)
 
+    // #region agent log
+    console.log('[DEBUG-ENV] Environment check:', JSON.stringify({
+      hasJupiterKey: !!process.env.JUPITER_API_KEY,
+      jupiterKeyLength: process.env.JUPITER_API_KEY?.length || 0,
+      hasSupabaseUrl: !!process.env.NEXT_PUBLIC_SUPABASE_URL,
+      nodeEnv: process.env.NODE_ENV,
+    }));
+    // #endregion
+
     console.log(`🌊 Fetching Meteora positions for wallet: ${walletAddress} (auth: ${authHeader ? 'yes' : 'no'})`)
 
     // Query Meteora API directly by wallet address - more reliable than stored position addresses
