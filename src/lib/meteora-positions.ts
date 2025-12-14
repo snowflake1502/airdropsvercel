@@ -231,13 +231,23 @@ export async function fetchMeteoraPositionsByWallet(
     console.log('[DEBUG-JUPITER] Fetching portfolio from Jupiter for wallet:', walletAddress);
     // #endregion
 
-    // Use Jupiter Portfolio API (lite endpoint - free, no API key required)
-    // lite-api.jup.ag aggregates data from 170+ protocols including Meteora
+    // Use Jupiter Portfolio API - requires API key (free tier available at portal.jup.ag)
+    const jupiterApiKey = process.env.JUPITER_API_KEY
+    
+    if (!jupiterApiKey) {
+      console.warn('JUPITER_API_KEY not set - cannot fetch portfolio data')
+      // #region agent log
+      console.log('[DEBUG-JUPITER] No API key configured');
+      // #endregion
+      return { positions: [], totalValueUSD: 0, totalUnclaimedFeesUSD: 0, errors: ['JUPITER_API_KEY not configured'] }
+    }
+
     const response = await fetch(
-      `https://lite-api.jup.ag/portfolio/v1/positions/${walletAddress}`,
+      `https://api.jup.ag/portfolio/v1/positions/${walletAddress}`,
       {
         headers: { 
           Accept: 'application/json',
+          'x-api-key': jupiterApiKey,
         },
         next: { revalidate: 30 },
       }
