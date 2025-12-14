@@ -247,14 +247,36 @@ async function fetchMeteoraPositionsDirect(
       }
     )
     
+    // #region agent log
+    console.log(`[DEBUG-METEORA] Pool list fetch status: ${poolsResponse.status} ${poolsResponse.statusText}`);
+    // #endregion
+    
     if (poolsResponse.ok) {
       const poolsData = await poolsResponse.json()
+      
+      // #region agent log
+      console.log(`[DEBUG-METEORA] Pool list response type: ${typeof poolsData}, isArray: ${Array.isArray(poolsData)}, keys: ${poolsData && typeof poolsData === 'object' ? Object.keys(poolsData).join(',') : 'N/A'}`);
+      // #endregion
+      
       if (Array.isArray(poolsData) && poolsData.length > 0) {
         const poolAddresses = poolsData.map((p: any) => p.address || p.pair_address).filter(Boolean)
         // Merge with known pools, remove duplicates
         poolsToCheck = [...new Set([...POPULAR_METEORA_POOLS, ...poolAddresses])]
         console.log(`[DEBUG-METEORA] Found ${poolsToCheck.length} pools to check (${poolAddresses.length} from API + ${POPULAR_METEORA_POOLS.length} known)`)
+      } else if (poolsData && typeof poolsData === 'object' && poolsData.data) {
+        // Try nested data structure
+        const nestedData = Array.isArray(poolsData.data) ? poolsData.data : []
+        const poolAddresses = nestedData.map((p: any) => p.address || p.pair_address).filter(Boolean)
+        if (poolAddresses.length > 0) {
+          poolsToCheck = [...new Set([...POPULAR_METEORA_POOLS, ...poolAddresses])]
+          console.log(`[DEBUG-METEORA] Found ${poolsToCheck.length} pools in nested data structure`)
+        }
       }
+    } else {
+      // #region agent log
+      const errorText = await poolsResponse.text().catch(() => '')
+      console.log(`[DEBUG-METEORA] Pool list fetch failed: ${poolsResponse.status} - ${errorText.slice(0, 200)}`);
+      // #endregion
     }
   } catch (err: any) {
     console.log(`[DEBUG-METEORA] Could not fetch pool list, using known pools only: ${err.message}`)
@@ -275,10 +297,19 @@ async function fetchMeteoraPositionsDirect(
         }
       )
 
-      if (!response.ok) continue
+      // #region agent log
+      if (!response.ok) {
+        console.log(`[DEBUG-METEORA] Pool ${poolAddress.slice(0,8)}... user endpoint: ${response.status} ${response.statusText}`)
+        continue
+      }
+      // #endregion
 
       const data = await response.json()
       const userPositions = data.user_positions || []
+
+      // #region agent log
+      console.log(`[DEBUG-METEORA] Pool ${poolAddress.slice(0,8)}... found ${userPositions.length} positions`)
+      // #endregion
 
       if (userPositions.length === 0) continue
 
