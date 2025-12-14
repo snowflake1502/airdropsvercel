@@ -223,7 +223,8 @@ const POPULAR_METEORA_POOLS = [
 ]
 
 /**
- * Fallback: Query Meteora directly for user positions in known pools
+ * Fallback: Query Meteora directly for user positions
+ * First tries to get all DLMM pools, then checks user positions in each
  */
 async function fetchMeteoraPositionsDirect(
   walletAddress: string
@@ -231,9 +232,39 @@ async function fetchMeteoraPositionsDirect(
   const positions: MeteoraPositionValue[] = []
   const errors: string[] = []
   
-  console.log('[DEBUG-FALLBACK] Trying direct Meteora API for known pools')
+  console.log('[DEBUG-FALLBACK] Trying direct Meteora API')
+  
+  // Try to get list of all DLMM pools from Meteora API
+  let poolsToCheck = [...POPULAR_METEORA_POOLS]
+  
+  try {
+    // Get top DLMM pools by liquidity (limit to top 20 for performance)
+    const poolsResponse = await fetch(
+      'https://dlmm-api.meteora.ag/pair/all_by_groups?page=0&limit=20&sort_key=tvl&order_by=desc',
+      {
+        headers: { Accept: 'application/json' },
+        next: { revalidate: 300 }, // Cache for 5 minutes
+      }
+    )
+    
+    if (poolsResponse.ok) {
+      const poolsData = await poolsResponse.json()
+      if (Array.isArray(poolsData) && poolsData.length > 0) {
+        const poolAddresses = poolsData.map((p: any) => p.address || p.pair_address).filter(Boolean)
+        // Merge with known pools, remove duplicates
+        poolsToCheck = [...new Set([...POPULAR_METEORA_POOLS, ...poolAddresses])]
+        console.log(`[DEBUG-FALLBACK] Found ${poolsToCheck.length} pools to check (${poolAddresses.length} from API + ${POPULAR_METEORA_POOLS.length} known)`)
+      }
+    }
+  } catch (err: any) {
+    console.log(`[DEBUG-FALLBACK] Could not fetch pool list, using known pools only: ${err.message}`)
+  }
 
-  for (const poolAddress of POPULAR_METEORA_POOLS) {
+  // Check each pool for user positions (limit to first 30 for performance)
+  const poolsToCheckLimited = poolsToCheck.slice(0, 30)
+  console.log(`[DEBUG-FALLBACK] Checking ${poolsToCheckLimited.length} pools for positions`)
+
+  for (const poolAddress of poolsToCheckLimited) {
     try {
       // Query user positions in this pool
       const response = await fetch(
