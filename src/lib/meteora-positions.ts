@@ -353,11 +353,10 @@ export async function fetchMeteoraPositionsByWallet(
       return await fetchMeteoraPositionsDirect(walletAddress)
     }
 
-    // Use the same endpoint that Jupiter Portfolio UI uses
-    // From browser console: portfolio-api-jup.sonar.watch/v1/portfolio/fetch
-    // Try with API key first, fallback to without if needed
+    // Try api.jup.ag endpoint (official Jupiter API)
+    // First try with platforms filter, then without if needed
     let response = await fetch(
-      `https://portfolio-api-jup.sonar.watch/v1/portfolio/fetch?address=${walletAddress}&addressSystem=solana`,
+      `https://api.jup.ag/portfolio/v1/positions/${walletAddress}?platforms=meteora`,
       {
         headers: { 
           Accept: 'application/json',
@@ -367,16 +366,17 @@ export async function fetchMeteoraPositionsByWallet(
       }
     )
 
-    // If 401/403, try without API key (might be public endpoint)
-    if (response.status === 401 || response.status === 403) {
+    // If empty or error, try without platforms filter to get all positions
+    if (!response.ok || response.status === 404) {
       // #region agent log
-      console.log('[DEBUG-JUPITER] API key rejected, trying without key');
+      console.log('[DEBUG-JUPITER] Filtered request failed, trying all positions');
       // #endregion
       response = await fetch(
-        `https://portfolio-api-jup.sonar.watch/v1/portfolio/fetch?address=${walletAddress}&addressSystem=solana`,
+        `https://api.jup.ag/portfolio/v1/positions/${walletAddress}`,
         {
           headers: { 
             Accept: 'application/json',
+            'x-api-key': jupiterApiKey,
           },
           next: { revalidate: 30 },
         }
@@ -403,6 +403,17 @@ export async function fetchMeteoraPositionsByWallet(
       fetcherReportsCount: portfolioData.fetcherReports?.length || 0,
       tokenInfoKeys: portfolioData.tokenInfo ? Object.keys(portfolioData.tokenInfo) : null,
     }));
+    
+    // Log all protocols/platforms found in the response
+    if (portfolioData.fetcherReports && Array.isArray(portfolioData.fetcherReports)) {
+      const protocols = portfolioData.fetcherReports.map((r: any) => ({
+        protocol: r.protocol,
+        protocolId: r.protocolId,
+        success: r.success,
+        positionsCount: r.positions?.length || 0,
+      }));
+      console.log('[DEBUG-JUPITER] All protocols in fetcherReports:', JSON.stringify(protocols));
+    }
     console.log('[DEBUG-JUPITER] Elements type:', typeof portfolioData.elements, 'isArray:', Array.isArray(portfolioData.elements));
     console.log('[DEBUG-JUPITER] Elements length:', portfolioData.elements?.length || 0);
     console.log('[DEBUG-JUPITER] Elements sample (first 3):', JSON.stringify(
