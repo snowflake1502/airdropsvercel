@@ -38,6 +38,96 @@ export interface MeteoraPositionsResult {
 
 const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'
 const SOL_MINT = 'So11111111111111111111111111111111111111112'
+const METEORA_DLMM_PROGRAM = 'LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo'
+
+/**
+ * Get RPC URL (Helius if available, fallback to public)
+ */
+function getRpcUrl(): string {
+  if (typeof window === 'undefined') {
+    // Server-side: Use Helius RPC URL from environment
+    const heliusUrl = process.env.HELIUS_RPC_URL || 
+                     process.env.SOLANA_RPC_URL ||
+                     'https://api.mainnet-beta.solana.com'
+    return heliusUrl
+  }
+  return `${window.location.origin}/api/rpc`
+}
+
+/**
+ * Fetch position value using Helius transaction history (works for closed positions)
+ * Similar to how metflex.io queries Meteora positions
+ */
+async function fetchMeteoraPositionViaHelius(
+  positionAddress: string
+): Promise<MeteoraPositionValue | null> {
+  try {
+    const rpcUrl = getRpcUrl()
+    
+    // #region agent log
+    console.log(`[DEBUG-HELIUS] Querying transaction history for position NFT: ${positionAddress}`);
+    // #endregion
+
+    // Use Helius getTransactionsForAddress to get all transactions for this position NFT
+    const response = await fetch(rpcUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'getTransactionsForAddress',
+        params: [
+          positionAddress,
+          {
+            transactionDetails: 'full',
+            sortOrder: 'desc', // Newest first
+            limit: 100,
+            filters: {
+              status: 'succeeded' // Only successful transactions
+            }
+          }
+        ]
+      })
+    })
+
+    if (!response.ok) {
+      console.warn(`Helius RPC error for position ${positionAddress}: ${response.status}`)
+      return null
+    }
+
+    const data = await response.json()
+    
+    if (data.error) {
+      console.warn(`Helius RPC error: ${data.error.message}`)
+      return null
+    }
+
+    const transactions = data.result?.data || []
+    
+    // #region agent log
+    console.log(`[DEBUG-HELIUS] Found ${transactions.length} transactions for position NFT`);
+    // #endregion
+
+    if (transactions.length === 0) {
+      return null
+    }
+
+    // Parse transactions to find:
+    // 1. Initial deposit (position open)
+    // 2. Fee claims
+    // 3. Withdrawals (position close)
+    // 4. Current position state (if still active)
+
+    // For now, try Meteora API first, fallback to transaction parsing if needed
+    // This is a placeholder - full implementation would parse all transactions
+    // and calculate position value from transaction history
+    
+    return null // Will implement full parsing next
+  } catch (error: any) {
+    console.error(`Error fetching position via Helius ${positionAddress}:`, error.message)
+    return null
+  }
+}
 
 /**
  * Fetch real-time value for a single Meteora position
@@ -405,6 +495,77 @@ async function fetchMeteoraPositionsDirect(
 }
 
 /**
+ * Fetch Meteora position accounts owned by wallet using Helius getProgramAccounts
+ * This replicates what Meteora SDK's getAllLbPairPositionsByUser does
+ * Queries on-chain accounts directly (works for both active and closed positions)
+ */
+async function fetchMeteoraPositionNFTsViaHelius(
+  walletAddress: string
+): Promise<string[]> {
+  try {
+    const rpcUrl = getRpcUrl()
+    
+    // #region agent log
+    console.log(`[DEBUG-HELIUS] Querying Meteora DLMM position accounts for wallet: ${walletAddress}`);
+    // #endregion
+
+    // Use getProgramAccounts to find all Meteora DLMM position accounts owned by this wallet
+    // This is what Meteora SDK does internally
+    const response = await fetch(rpcUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'getProgramAccounts',
+        params: [
+          METEORA_DLMM_PROGRAM,
+          {
+            encoding: 'base64',
+            filters: [
+              {
+                memcmp: {
+                  offset: 8, // Skip discriminator (8 bytes)
+                  bytes: walletAddress, // Filter by owner address
+                }
+              }
+            ]
+          }
+        ]
+      })
+    })
+
+    if (!response.ok) {
+      console.warn(`Helius getProgramAccounts error: ${response.status}`)
+      return []
+    }
+
+    const data = await response.json()
+    
+    if (data.error) {
+      // #region agent log
+      console.log(`[DEBUG-HELIUS] getProgramAccounts error: ${data.error.message}`);
+      // #endregion
+      return []
+    }
+
+    const accounts = data.result || []
+    
+    // Extract position account addresses (these are the position NFT addresses)
+    const positionAddresses = accounts.map((acc: any) => acc.pubkey)
+    
+    // #region agent log
+    console.log(`[DEBUG-HELIUS] Found ${positionAddresses.length} Meteora position accounts`);
+    // #endregion
+
+    return positionAddresses
+  } catch (error: any) {
+    console.error(`Error fetching Meteora positions via Helius:`, error.message)
+    return []
+  }
+}
+
+/**
  * Fetch Meteora positions using Meteora's direct API
  * This is the primary method - queries Meteora API directly for accurate position data
  * Meteora API uses on-chain data (via Helius RPC) to provide real-time position values
@@ -412,9 +573,26 @@ async function fetchMeteoraPositionsDirect(
 export async function fetchMeteoraPositionsByWallet(
   walletAddress: string
 ): Promise<MeteoraPositionsResult> {
-  // Use direct Meteora API as primary method
-  // It queries on-chain data and provides accurate position values
-  console.log(`🌊 Fetching Meteora positions directly from Meteora API for wallet: ${walletAddress}`)
+  // Try Helius-first approach (like metflex.io) to find position NFTs
+  console.log(`🌊 Fetching Meteora positions for wallet: ${walletAddress}`)
+  
+  const positionNFTs = await fetchMeteoraPositionNFTsViaHelius(walletAddress)
+  
+  if (positionNFTs.length > 0) {
+    // #region agent log
+    console.log(`[DEBUG-HELIUS] Found ${positionNFTs.length} position NFTs, fetching values`);
+    // #endregion
+    
+    // Fetch values for each position NFT
+    const result = await fetchMeteoraPositionsValues(positionNFTs)
+    
+    if (result.positions.length > 0) {
+      return result
+    }
+  }
+  
+  // Fallback to Meteora API direct query
+  console.log(`🌊 Falling back to Meteora API direct query`)
   return await fetchMeteoraPositionsDirect(walletAddress)
 }
 
