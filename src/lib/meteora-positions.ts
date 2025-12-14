@@ -353,8 +353,9 @@ export async function fetchMeteoraPositionsByWallet(
       return await fetchMeteoraPositionsDirect(walletAddress)
     }
 
+    // Add platforms=meteora query parameter to filter for Meteora positions
     const response = await fetch(
-      `https://api.jup.ag/portfolio/v1/positions/${walletAddress}`,
+      `https://api.jup.ag/portfolio/v1/positions/${walletAddress}?platforms=meteora`,
       {
         headers: { 
           Accept: 'application/json',
@@ -376,6 +377,14 @@ export async function fetchMeteoraPositionsByWallet(
     
     // #region agent log
     console.log('[DEBUG-JUPITER] Raw response keys:', JSON.stringify(Object.keys(portfolioData)));
+    console.log('[DEBUG-JUPITER] Full response structure:', JSON.stringify({
+      date: portfolioData.date,
+      owner: portfolioData.owner,
+      duration: portfolioData.duration,
+      elementsCount: portfolioData.elements?.length || 0,
+      fetcherReportsCount: portfolioData.fetcherReports?.length || 0,
+      tokenInfoKeys: portfolioData.tokenInfo ? Object.keys(portfolioData.tokenInfo) : null,
+    }));
     console.log('[DEBUG-JUPITER] Elements type:', typeof portfolioData.elements, 'isArray:', Array.isArray(portfolioData.elements));
     console.log('[DEBUG-JUPITER] Elements length:', portfolioData.elements?.length || 0);
     console.log('[DEBUG-JUPITER] Elements sample (first 3):', JSON.stringify(
