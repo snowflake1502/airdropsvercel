@@ -200,8 +200,25 @@ export async function fetchMeteoraPositionValue(
 }
 
 /**
- * Fetch all Meteora positions for a wallet address directly from Meteora API
- * This is more reliable than querying by stored position addresses
+ * Jupiter Portfolio API Response types
+ */
+interface JupiterPortfolioPosition {
+  type: string
+  platformId: string
+  label: string
+  value: number
+  data: any
+}
+
+interface JupiterPortfolioResponse {
+  positions: JupiterPortfolioPosition[]
+  totalValue?: number
+}
+
+/**
+ * Fetch Meteora positions using Jupiter Portfolio API
+ * Jupiter aggregates data from 170+ protocols including Meteora
+ * This is more reliable than querying Meteora directly
  */
 export async function fetchMeteoraPositionsByWallet(
   walletAddress: string
@@ -211,60 +228,116 @@ export async function fetchMeteoraPositionsByWallet(
 
   try {
     // #region agent log
-    console.log('[DEBUG-WALLET] Fetching positions by wallet:', walletAddress);
+    console.log('[DEBUG-JUPITER] Fetching portfolio from Jupiter for wallet:', walletAddress);
     // #endregion
 
-    // Query Meteora for all positions owned by this wallet
+    // Use Jupiter Portfolio API - aggregates data from 170+ protocols
     const response = await fetch(
-      `https://dlmm-api.meteora.ag/position/find_by_user?owner=${walletAddress}`,
+      `https://api.jup.ag/portfolio/v1/positions/${walletAddress}`,
       {
-        headers: { Accept: 'application/json' },
+        headers: { 
+          Accept: 'application/json',
+        },
         next: { revalidate: 30 },
       }
     )
 
     if (!response.ok) {
-      console.warn(`Meteora user positions API error: ${response.status}`)
-      return { positions: [], totalValueUSD: 0, totalUnclaimedFeesUSD: 0, errors: [`API error: ${response.status}`] }
+      console.warn(`Jupiter Portfolio API error: ${response.status}`)
+      // #region agent log
+      console.log('[DEBUG-JUPITER] API error:', response.status);
+      // #endregion
+      return { positions: [], totalValueUSD: 0, totalUnclaimedFeesUSD: 0, errors: [`Jupiter API error: ${response.status}`] }
     }
 
-    const userPositions = await response.json()
+    const portfolioData = await response.json()
     
     // #region agent log
-    console.log('[DEBUG-WALLET] Found positions:', JSON.stringify({ count: userPositions?.length || 0 }));
+    console.log('[DEBUG-JUPITER] Raw response keys:', JSON.stringify(Object.keys(portfolioData)));
     // #endregion
 
-    if (!userPositions || userPositions.length === 0) {
-      return { positions: [], totalValueUSD: 0, totalUnclaimedFeesUSD: 0, errors: [] }
+    // Find Meteora positions from the portfolio
+    // Jupiter returns positions with platformId indicating the protocol
+    const allPositions = portfolioData.positions || portfolioData.elements || portfolioData || []
+    
+    // #region agent log
+    console.log('[DEBUG-JUPITER] All positions count:', Array.isArray(allPositions) ? allPositions.length : 'not array');
+    console.log('[DEBUG-JUPITER] Position platforms:', JSON.stringify(
+      Array.isArray(allPositions) 
+        ? allPositions.map((p: any) => ({ platformId: p.platformId, label: p.label, value: p.value })).slice(0, 10)
+        : allPositions
+    ));
+    // #endregion
+
+    // Filter for Meteora positions
+    const meteoraPositions = Array.isArray(allPositions) 
+      ? allPositions.filter((p: any) => 
+          p.platformId?.toLowerCase().includes('meteora') ||
+          p.label?.toLowerCase().includes('meteora') ||
+          p.type?.toLowerCase().includes('meteora')
+        )
+      : []
+
+    // #region agent log
+    console.log('[DEBUG-JUPITER] Meteora positions found:', JSON.stringify({ 
+      count: meteoraPositions.length,
+      positions: meteoraPositions.map((p: any) => ({ label: p.label, value: p.value, platformId: p.platformId }))
+    }));
+    // #endregion
+
+    let totalValueUSD = 0
+    let totalUnclaimedFeesUSD = 0
+
+    for (const pos of meteoraPositions) {
+      totalValueUSD += pos.value || 0
+      
+      // Try to extract fee info if available
+      if (pos.data?.unclaimedFees) {
+        totalUnclaimedFeesUSD += pos.data.unclaimedFees
+      }
+
+      // Create a position entry for each Meteora position
+      positions.push({
+        positionAddress: pos.data?.address || 'unknown',
+        pairAddress: pos.data?.pairAddress || 'unknown',
+        pairName: pos.label || pos.data?.name || 'Meteora LP',
+        owner: walletAddress,
+        tokenX: {
+          symbol: pos.data?.tokenX?.symbol || 'Unknown',
+          mint: pos.data?.tokenX?.mint || '',
+          amount: pos.data?.tokenX?.amount || 0,
+          price: pos.data?.tokenX?.price || 0,
+          valueUSD: pos.data?.tokenX?.valueUSD || 0,
+        },
+        tokenY: {
+          symbol: pos.data?.tokenY?.symbol || 'Unknown',
+          mint: pos.data?.tokenY?.mint || '',
+          amount: pos.data?.tokenY?.amount || 0,
+          price: pos.data?.tokenY?.price || 0,
+          valueUSD: pos.data?.tokenY?.valueUSD || 0,
+        },
+        totalValueUSD: pos.value || 0,
+        unclaimedFeesUSD: pos.data?.unclaimedFees || 0,
+        totalFeesClaimed: pos.data?.totalFeesClaimed || 0,
+        isOutOfRange: pos.data?.isOutOfRange || false,
+        feeAPR24h: pos.data?.feeAPR24h || 0,
+      })
     }
 
-    // Process each position
-    for (const pos of userPositions) {
-      try {
-        const positionValue = await fetchMeteoraPositionValue(pos.address || pos.public_key)
-        if (positionValue) {
-          positions.push(positionValue)
-        }
-      } catch (err: any) {
-        errors.push(`Failed to fetch position ${pos.address}: ${err.message}`)
-      }
+    // #region agent log
+    console.log('[DEBUG-JUPITER] Final result:', JSON.stringify({ totalValueUSD, totalUnclaimedFeesUSD, positionCount: positions.length }));
+    // #endregion
+
+    return {
+      positions,
+      totalValueUSD,
+      totalUnclaimedFeesUSD,
+      errors,
     }
   } catch (err: any) {
-    errors.push(`Failed to fetch wallet positions: ${err.message}`)
-  }
-
-  const totalValueUSD = positions.reduce((sum, p) => sum + p.totalValueUSD, 0)
-  const totalUnclaimedFeesUSD = positions.reduce((sum, p) => sum + p.unclaimedFeesUSD, 0)
-
-  // #region agent log
-  console.log('[DEBUG-WALLET] Final result:', JSON.stringify({ totalValueUSD, totalUnclaimedFeesUSD, positionCount: positions.length }));
-  // #endregion
-
-  return {
-    positions,
-    totalValueUSD,
-    totalUnclaimedFeesUSD,
-    errors,
+    console.error('Jupiter Portfolio API error:', err.message)
+    errors.push(`Failed to fetch Jupiter portfolio: ${err.message}`)
+    return { positions: [], totalValueUSD: 0, totalUnclaimedFeesUSD: 0, errors }
   }
 }
 
