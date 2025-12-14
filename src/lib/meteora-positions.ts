@@ -376,29 +376,76 @@ export async function fetchMeteoraPositionsByWallet(
     
     // #region agent log
     console.log('[DEBUG-JUPITER] Raw response keys:', JSON.stringify(Object.keys(portfolioData)));
+    console.log('[DEBUG-JUPITER] Elements type:', typeof portfolioData.elements, 'isArray:', Array.isArray(portfolioData.elements));
+    console.log('[DEBUG-JUPITER] Elements length:', portfolioData.elements?.length || 0);
+    console.log('[DEBUG-JUPITER] Elements sample (first 3):', JSON.stringify(
+      Array.isArray(portfolioData.elements) 
+        ? portfolioData.elements.slice(0, 3).map((e: any) => ({
+            type: typeof e,
+            keys: typeof e === 'object' ? Object.keys(e) : 'not object',
+            platformId: e?.platformId,
+            label: e?.label,
+            protocol: e?.protocol,
+            protocolId: e?.protocolId,
+          }))
+        : portfolioData.elements
+    ));
+    console.log('[DEBUG-JUPITER] FetcherReports:', JSON.stringify(
+      portfolioData.fetcherReports?.slice(0, 3).map((r: any) => ({
+        protocol: r?.protocol,
+        protocolId: r?.protocolId,
+        success: r?.success,
+        positionsCount: r?.positions?.length || 0,
+      })) || []
+    ));
     // #endregion
 
     // Find Meteora positions from the portfolio
-    // Jupiter returns positions with platformId indicating the protocol
-    const allPositions = portfolioData.positions || portfolioData.elements || portfolioData || []
+    // Jupiter returns positions in elements array, or sometimes in fetcherReports
+    let allPositions: any[] = []
+    
+    if (Array.isArray(portfolioData.elements) && portfolioData.elements.length > 0) {
+      allPositions = portfolioData.elements
+    } else if (Array.isArray(portfolioData.fetcherReports)) {
+      // Extract positions from fetcherReports
+      for (const report of portfolioData.fetcherReports) {
+        if (report.positions && Array.isArray(report.positions)) {
+          allPositions.push(...report.positions)
+        }
+      }
+    } else if (portfolioData.positions) {
+      allPositions = Array.isArray(portfolioData.positions) ? portfolioData.positions : []
+    }
     
     // #region agent log
-    console.log('[DEBUG-JUPITER] All positions count:', Array.isArray(allPositions) ? allPositions.length : 'not array');
+    console.log('[DEBUG-JUPITER] All positions count:', allPositions.length);
     console.log('[DEBUG-JUPITER] Position platforms:', JSON.stringify(
-      Array.isArray(allPositions) 
-        ? allPositions.map((p: any) => ({ platformId: p.platformId, label: p.label, value: p.value })).slice(0, 10)
-        : allPositions
+      allPositions.slice(0, 10).map((p: any) => ({ 
+        platformId: p.platformId, 
+        protocolId: p.protocolId,
+        protocol: p.protocol,
+        label: p.label, 
+        value: p.value,
+        type: p.type,
+      }))
     ));
     // #endregion
 
     // Filter for Meteora positions
-    const meteoraPositions = Array.isArray(allPositions) 
-      ? allPositions.filter((p: any) => 
-          p.platformId?.toLowerCase().includes('meteora') ||
-          p.label?.toLowerCase().includes('meteora') ||
-          p.type?.toLowerCase().includes('meteora')
-        )
-      : []
+    // Check multiple fields: platformId, protocolId, protocol, label, type
+    const meteoraPositions = allPositions.filter((p: any) => {
+      const platformId = String(p.platformId || '').toLowerCase()
+      const protocolId = String(p.protocolId || '').toLowerCase()
+      const protocol = String(p.protocol || '').toLowerCase()
+      const label = String(p.label || '').toLowerCase()
+      const type = String(p.type || '').toLowerCase()
+      
+      return platformId.includes('meteora') ||
+             protocolId.includes('meteora') ||
+             protocol.includes('meteora') ||
+             label.includes('meteora') ||
+             type.includes('meteora')
+    })
 
     // #region agent log
     console.log('[DEBUG-JUPITER] Meteora positions found:', JSON.stringify({ 
