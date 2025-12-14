@@ -353,9 +353,11 @@ export async function fetchMeteoraPositionsByWallet(
       return await fetchMeteoraPositionsDirect(walletAddress)
     }
 
-    // Add platforms=meteora query parameter to filter for Meteora positions
-    const response = await fetch(
-      `https://api.jup.ag/portfolio/v1/positions/${walletAddress}?platforms=meteora`,
+    // Use the same endpoint that Jupiter Portfolio UI uses
+    // From browser console: portfolio-api-jup.sonar.watch/v1/portfolio/fetch
+    // Try with API key first, fallback to without if needed
+    let response = await fetch(
+      `https://portfolio-api-jup.sonar.watch/v1/portfolio/fetch?address=${walletAddress}&addressSystem=solana`,
       {
         headers: { 
           Accept: 'application/json',
@@ -364,6 +366,22 @@ export async function fetchMeteoraPositionsByWallet(
         next: { revalidate: 30 },
       }
     )
+
+    // If 401/403, try without API key (might be public endpoint)
+    if (response.status === 401 || response.status === 403) {
+      // #region agent log
+      console.log('[DEBUG-JUPITER] API key rejected, trying without key');
+      // #endregion
+      response = await fetch(
+        `https://portfolio-api-jup.sonar.watch/v1/portfolio/fetch?address=${walletAddress}&addressSystem=solana`,
+        {
+          headers: { 
+            Accept: 'application/json',
+          },
+          next: { revalidate: 30 },
+        }
+      )
+    }
 
     if (!response.ok) {
       console.warn(`Jupiter Portfolio API error: ${response.status} - falling back to direct Meteora API`)
