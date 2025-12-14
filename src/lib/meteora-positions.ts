@@ -232,7 +232,7 @@ async function fetchMeteoraPositionsDirect(
   const positions: MeteoraPositionValue[] = []
   const errors: string[] = []
   
-  console.log('[DEBUG-FALLBACK] Trying direct Meteora API')
+  console.log('[DEBUG-METEORA] Fetching positions from Meteora API')
   
   // Try to get list of all DLMM pools from Meteora API
   let poolsToCheck = [...POPULAR_METEORA_POOLS]
@@ -253,16 +253,16 @@ async function fetchMeteoraPositionsDirect(
         const poolAddresses = poolsData.map((p: any) => p.address || p.pair_address).filter(Boolean)
         // Merge with known pools, remove duplicates
         poolsToCheck = [...new Set([...POPULAR_METEORA_POOLS, ...poolAddresses])]
-        console.log(`[DEBUG-FALLBACK] Found ${poolsToCheck.length} pools to check (${poolAddresses.length} from API + ${POPULAR_METEORA_POOLS.length} known)`)
+        console.log(`[DEBUG-METEORA] Found ${poolsToCheck.length} pools to check (${poolAddresses.length} from API + ${POPULAR_METEORA_POOLS.length} known)`)
       }
     }
   } catch (err: any) {
-    console.log(`[DEBUG-FALLBACK] Could not fetch pool list, using known pools only: ${err.message}`)
+    console.log(`[DEBUG-METEORA] Could not fetch pool list, using known pools only: ${err.message}`)
   }
 
   // Check each pool for user positions (limit to first 30 for performance)
   const poolsToCheckLimited = poolsToCheck.slice(0, 30)
-  console.log(`[DEBUG-FALLBACK] Checking ${poolsToCheckLimited.length} pools for positions`)
+  console.log(`[DEBUG-METEORA] Checking ${poolsToCheckLimited.length} pools for positions`)
 
   for (const poolAddress of poolsToCheckLimited) {
     try {
@@ -352,231 +352,23 @@ async function fetchMeteoraPositionsDirect(
   const totalValueUSD = positions.reduce((sum, p) => sum + p.totalValueUSD, 0)
   const totalUnclaimedFeesUSD = positions.reduce((sum, p) => sum + p.unclaimedFeesUSD, 0)
 
-  console.log(`[DEBUG-FALLBACK] Found ${positions.length} positions worth $${totalValueUSD.toFixed(2)}`)
+  console.log(`[DEBUG-METEORA] Found ${positions.length} positions worth $${totalValueUSD.toFixed(2)}`)
 
   return { positions, totalValueUSD, totalUnclaimedFeesUSD, errors }
 }
 
 /**
- * Fetch Meteora positions using Jupiter Portfolio API
- * Jupiter aggregates data from 170+ protocols including Meteora
- * Falls back to direct Meteora API if Jupiter fails
+ * Fetch Meteora positions using Meteora's direct API
+ * This is the primary method - queries Meteora API directly for accurate position data
+ * Meteora API uses on-chain data (via Helius RPC) to provide real-time position values
  */
 export async function fetchMeteoraPositionsByWallet(
   walletAddress: string
 ): Promise<MeteoraPositionsResult> {
-  const positions: MeteoraPositionValue[] = []
-  const errors: string[] = []
-
-  try {
-    // #region agent log
-    console.log('[DEBUG-JUPITER] Fetching portfolio from Jupiter for wallet:', walletAddress);
-    // #endregion
-
-    // Use Jupiter Portfolio API - requires API key (free tier available at portal.jup.ag)
-    const jupiterApiKey = process.env.JUPITER_API_KEY
-    
-    if (!jupiterApiKey) {
-      console.warn('JUPITER_API_KEY not set - falling back to direct Meteora API')
-      // #region agent log
-      console.log('[DEBUG-JUPITER] No API key - using fallback');
-      // #endregion
-      return await fetchMeteoraPositionsDirect(walletAddress)
-    }
-
-    // Try api.jup.ag endpoint (official Jupiter API)
-    // First try with platforms filter, then without if needed
-    let response = await fetch(
-      `https://api.jup.ag/portfolio/v1/positions/${walletAddress}?platforms=meteora`,
-      {
-        headers: { 
-          Accept: 'application/json',
-          'x-api-key': jupiterApiKey,
-        },
-        next: { revalidate: 30 },
-      }
-    )
-
-    // If empty or error, try without platforms filter to get all positions
-    if (!response.ok || response.status === 404) {
-      // #region agent log
-      console.log('[DEBUG-JUPITER] Filtered request failed, trying all positions');
-      // #endregion
-      response = await fetch(
-        `https://api.jup.ag/portfolio/v1/positions/${walletAddress}`,
-        {
-          headers: { 
-            Accept: 'application/json',
-            'x-api-key': jupiterApiKey,
-          },
-          next: { revalidate: 30 },
-        }
-      )
-    }
-
-    if (!response.ok) {
-      console.warn(`Jupiter Portfolio API error: ${response.status} - falling back to direct Meteora API`)
-      // #region agent log
-      console.log('[DEBUG-JUPITER] API error:', response.status, '- using fallback');
-      // #endregion
-      return await fetchMeteoraPositionsDirect(walletAddress)
-    }
-
-    const portfolioData = await response.json()
-    
-    // #region agent log
-    console.log('[DEBUG-JUPITER] Raw response keys:', JSON.stringify(Object.keys(portfolioData)));
-    console.log('[DEBUG-JUPITER] Full response structure:', JSON.stringify({
-      date: portfolioData.date,
-      owner: portfolioData.owner,
-      duration: portfolioData.duration,
-      elementsCount: portfolioData.elements?.length || 0,
-      fetcherReportsCount: portfolioData.fetcherReports?.length || 0,
-      tokenInfoKeys: portfolioData.tokenInfo ? Object.keys(portfolioData.tokenInfo) : null,
-    }));
-    
-    // Log all protocols/platforms found in the response
-    if (portfolioData.fetcherReports && Array.isArray(portfolioData.fetcherReports)) {
-      const protocols = portfolioData.fetcherReports.map((r: any) => ({
-        protocol: r.protocol,
-        protocolId: r.protocolId,
-        success: r.success,
-        positionsCount: r.positions?.length || 0,
-      }));
-      console.log('[DEBUG-JUPITER] All protocols in fetcherReports:', JSON.stringify(protocols));
-    }
-    console.log('[DEBUG-JUPITER] Elements type:', typeof portfolioData.elements, 'isArray:', Array.isArray(portfolioData.elements));
-    console.log('[DEBUG-JUPITER] Elements length:', portfolioData.elements?.length || 0);
-    console.log('[DEBUG-JUPITER] Elements sample (first 3):', JSON.stringify(
-      Array.isArray(portfolioData.elements) 
-        ? portfolioData.elements.slice(0, 3).map((e: any) => ({
-            type: typeof e,
-            keys: typeof e === 'object' ? Object.keys(e) : 'not object',
-            platformId: e?.platformId,
-            label: e?.label,
-            protocol: e?.protocol,
-            protocolId: e?.protocolId,
-          }))
-        : portfolioData.elements
-    ));
-    console.log('[DEBUG-JUPITER] FetcherReports:', JSON.stringify(
-      portfolioData.fetcherReports?.slice(0, 3).map((r: any) => ({
-        protocol: r?.protocol,
-        protocolId: r?.protocolId,
-        success: r?.success,
-        positionsCount: r?.positions?.length || 0,
-      })) || []
-    ));
-    // #endregion
-
-    // Find Meteora positions from the portfolio
-    // Jupiter returns positions in elements array, or sometimes in fetcherReports
-    let allPositions: any[] = []
-    
-    if (Array.isArray(portfolioData.elements) && portfolioData.elements.length > 0) {
-      allPositions = portfolioData.elements
-    } else if (Array.isArray(portfolioData.fetcherReports)) {
-      // Extract positions from fetcherReports
-      for (const report of portfolioData.fetcherReports) {
-        if (report.positions && Array.isArray(report.positions)) {
-          allPositions.push(...report.positions)
-        }
-      }
-    } else if (portfolioData.positions) {
-      allPositions = Array.isArray(portfolioData.positions) ? portfolioData.positions : []
-    }
-    
-    // #region agent log
-    console.log('[DEBUG-JUPITER] All positions count:', allPositions.length);
-    console.log('[DEBUG-JUPITER] Position platforms:', JSON.stringify(
-      allPositions.slice(0, 10).map((p: any) => ({ 
-        platformId: p.platformId, 
-        protocolId: p.protocolId,
-        protocol: p.protocol,
-        label: p.label, 
-        value: p.value,
-        type: p.type,
-      }))
-    ));
-    // #endregion
-
-    // Filter for Meteora positions
-    // Check multiple fields: platformId, protocolId, protocol, label, type
-    const meteoraPositions = allPositions.filter((p: any) => {
-      const platformId = String(p.platformId || '').toLowerCase()
-      const protocolId = String(p.protocolId || '').toLowerCase()
-      const protocol = String(p.protocol || '').toLowerCase()
-      const label = String(p.label || '').toLowerCase()
-      const type = String(p.type || '').toLowerCase()
-      
-      return platformId.includes('meteora') ||
-             protocolId.includes('meteora') ||
-             protocol.includes('meteora') ||
-             label.includes('meteora') ||
-             type.includes('meteora')
-    })
-
-    // #region agent log
-    console.log('[DEBUG-JUPITER] Meteora positions found:', JSON.stringify({ 
-      count: meteoraPositions.length,
-      positions: meteoraPositions.map((p: any) => ({ label: p.label, value: p.value, platformId: p.platformId }))
-    }));
-    // #endregion
-
-    let totalValueUSD = 0
-    let totalUnclaimedFeesUSD = 0
-
-    for (const pos of meteoraPositions) {
-      totalValueUSD += pos.value || 0
-      
-      // Try to extract fee info if available
-      if (pos.data?.unclaimedFees) {
-        totalUnclaimedFeesUSD += pos.data.unclaimedFees
-      }
-
-      // Create a position entry for each Meteora position
-      positions.push({
-        positionAddress: pos.data?.address || 'unknown',
-        pairAddress: pos.data?.pairAddress || 'unknown',
-        pairName: pos.label || pos.data?.name || 'Meteora LP',
-        owner: walletAddress,
-        tokenX: {
-          symbol: pos.data?.tokenX?.symbol || 'Unknown',
-          mint: pos.data?.tokenX?.mint || '',
-          amount: pos.data?.tokenX?.amount || 0,
-          price: pos.data?.tokenX?.price || 0,
-          valueUSD: pos.data?.tokenX?.valueUSD || 0,
-        },
-        tokenY: {
-          symbol: pos.data?.tokenY?.symbol || 'Unknown',
-          mint: pos.data?.tokenY?.mint || '',
-          amount: pos.data?.tokenY?.amount || 0,
-          price: pos.data?.tokenY?.price || 0,
-          valueUSD: pos.data?.tokenY?.valueUSD || 0,
-        },
-        totalValueUSD: pos.value || 0,
-        unclaimedFeesUSD: pos.data?.unclaimedFees || 0,
-        totalFeesClaimed: pos.data?.totalFeesClaimed || 0,
-        isOutOfRange: pos.data?.isOutOfRange || false,
-        feeAPR24h: pos.data?.feeAPR24h || 0,
-      })
-    }
-
-    // #region agent log
-    console.log('[DEBUG-JUPITER] Final result:', JSON.stringify({ totalValueUSD, totalUnclaimedFeesUSD, positionCount: positions.length }));
-    // #endregion
-
-    return {
-      positions,
-      totalValueUSD,
-      totalUnclaimedFeesUSD,
-      errors,
-    }
-  } catch (err: any) {
-    console.error('Jupiter Portfolio API error:', err.message)
-    errors.push(`Failed to fetch Jupiter portfolio: ${err.message}`)
-    return { positions: [], totalValueUSD: 0, totalUnclaimedFeesUSD: 0, errors }
-  }
+  // Use direct Meteora API as primary method
+  // It queries on-chain data and provides accurate position values
+  console.log(`🌊 Fetching Meteora positions directly from Meteora API for wallet: ${walletAddress}`)
+  return await fetchMeteoraPositionsDirect(walletAddress)
 }
 
 /**
