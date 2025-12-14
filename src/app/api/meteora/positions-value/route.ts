@@ -106,10 +106,28 @@ export async function GET(request: NextRequest) {
         console.log(`🌊 Trying database approach: ${activePositionAddresses.length} stored positions`)
         result = await fetchMeteoraPositionsValues(activePositionAddresses)
         
+        // #region agent log
+        console.log('[DEBUG-DB] Database approach result:', JSON.stringify({positionsFound: result.positions.length, totalValue: result.totalValueUSD, errors: result.errors}));
+        // #endregion
+        
         // If database approach returned 0 positions, fallback to wallet-based query
+        // Also check if stored addresses might be pool addresses - try querying those pools directly
         if (result.positions.length === 0 || result.totalValueUSD === 0) {
-          console.log(`🌊 Database approach returned 0 positions, falling back to wallet-based query`)
-          result = await fetchMeteoraPositionsByWallet(walletAddress)
+          console.log(`🌊 Database approach returned 0 positions, trying stored addresses as pool addresses`)
+          
+          // Try treating stored addresses as pool addresses and query user positions in those pools
+          const poolAddresses = transactions
+            .map(tx => tx.pool_address || tx.position_nft_address)
+            .filter((addr, index, arr) => addr && arr.indexOf(addr) === index) // unique
+          
+          if (poolAddresses.length > 0) {
+            console.log(`🌊 Trying ${poolAddresses.length} stored pool addresses`)
+            // Use wallet-based query but prioritize these pools
+            result = await fetchMeteoraPositionsByWallet(walletAddress)
+          } else {
+            console.log(`🌊 Falling back to wallet-based query`)
+            result = await fetchMeteoraPositionsByWallet(walletAddress)
+          }
         }
       } else {
         // No active positions in DB, use wallet-based query

@@ -251,26 +251,42 @@ async function fetchMeteoraPositionsDirect(
     console.log(`[DEBUG-METEORA] Pool list fetch status: ${poolsResponse.status} ${poolsResponse.statusText}`);
     // #endregion
     
-    if (poolsResponse.ok) {
+      if (poolsResponse.ok) {
       const poolsData = await poolsResponse.json()
       
       // #region agent log
       console.log(`[DEBUG-METEORA] Pool list response type: ${typeof poolsData}, isArray: ${Array.isArray(poolsData)}, keys: ${poolsData && typeof poolsData === 'object' ? Object.keys(poolsData).join(',') : 'N/A'}`);
       // #endregion
       
-      if (Array.isArray(poolsData) && poolsData.length > 0) {
-        const poolAddresses = poolsData.map((p: any) => p.address || p.pair_address).filter(Boolean)
+      let poolAddresses: string[] = []
+      
+      // Handle different response structures
+      if (Array.isArray(poolsData)) {
+        // Direct array
+        poolAddresses = poolsData.map((p: any) => p.address || p.pair_address).filter(Boolean)
+      } else if (poolsData && typeof poolsData === 'object') {
+        // Try groups array (from all_by_groups endpoint)
+        if (poolsData.groups && Array.isArray(poolsData.groups)) {
+          // Flatten groups - each group contains pools
+          for (const group of poolsData.groups) {
+            if (group.pairs && Array.isArray(group.pairs)) {
+              const groupPools = group.pairs.map((p: any) => p.address || p.pair_address).filter(Boolean)
+              poolAddresses.push(...groupPools)
+            }
+          }
+        } else if (poolsData.data && Array.isArray(poolsData.data)) {
+          // Try nested data structure
+          poolAddresses = poolsData.data.map((p: any) => p.address || p.pair_address).filter(Boolean)
+        } else if (poolsData.pairs && Array.isArray(poolsData.pairs)) {
+          // Try pairs array
+          poolAddresses = poolsData.pairs.map((p: any) => p.address || p.pair_address).filter(Boolean)
+        }
+      }
+      
+      if (poolAddresses.length > 0) {
         // Merge with known pools, remove duplicates
         poolsToCheck = [...new Set([...POPULAR_METEORA_POOLS, ...poolAddresses])]
         console.log(`[DEBUG-METEORA] Found ${poolsToCheck.length} pools to check (${poolAddresses.length} from API + ${POPULAR_METEORA_POOLS.length} known)`)
-      } else if (poolsData && typeof poolsData === 'object' && poolsData.data) {
-        // Try nested data structure
-        const nestedData = Array.isArray(poolsData.data) ? poolsData.data : []
-        const poolAddresses = nestedData.map((p: any) => p.address || p.pair_address).filter(Boolean)
-        if (poolAddresses.length > 0) {
-          poolsToCheck = [...new Set([...POPULAR_METEORA_POOLS, ...poolAddresses])]
-          console.log(`[DEBUG-METEORA] Found ${poolsToCheck.length} pools in nested data structure`)
-        }
       }
     } else {
       // #region agent log
