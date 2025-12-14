@@ -38,11 +38,18 @@ export async function GET(request: NextRequest) {
       .eq('wallet_address', walletAddress)
       .not('position_nft_address', 'is', null)
 
+    // #region agent log
+    console.log('[DEBUG-DB] Database query result:', JSON.stringify({error: error?.message, transactionCount: transactions?.length, userId, walletAddress}));
+    // #endregion
+
     if (error) {
       throw new Error(`Database error: ${error.message}`)
     }
 
     if (!transactions || transactions.length === 0) {
+      // #region agent log
+      console.log('[DEBUG-DB] No transactions found - returning early');
+      // #endregion
       return NextResponse.json({
         success: true,
         totalValueUSD: 0,
