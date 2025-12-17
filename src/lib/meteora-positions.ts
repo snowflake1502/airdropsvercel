@@ -582,26 +582,55 @@ async function fetchMeteoraPositionNFTsViaHelius(
       const txResults = await Promise.all(txPromises)
       
       for (const txData of txResults) {
-        if (!txData?.result?.transaction) continue
+        if (!txData?.result) continue
         
-        const tx = txData.result.transaction as ParsedTransaction
-        
-        // Use existing parser to check if this is a Meteora transaction
-        if (!isMeteoraDLMMTransaction(tx)) continue
-
-        // Determine transaction type using existing parser
-        const txType = determineTransactionType(tx)
-        
-        // Only extract position NFT from position_open transactions
-        if (txType === 'position_open') {
-          // Use existing parser to extract position NFT address
-          const positionNFT = extractPositionNFTAddress(tx, txType)
-          if (positionNFT) {
-            positionNFTs.add(positionNFT)
+        try {
+          // getTransaction returns { result: { transaction: {...}, meta: {...}, slot, blockTime } }
+          // The result itself is the ParsedTransaction structure
+          const tx = txData.result as ParsedTransaction
+          
+          // Check if transaction has required structure
+          if (!tx?.transaction?.message || !tx?.meta) {
             // #region agent log
-            console.log(`[DEBUG-HELIUS] Found position_open transaction with NFT: ${positionNFT.slice(0, 8)}...`);
+            console.log(`[DEBUG-HELIUS] Skipping transaction - missing structure`);
             // #endregion
+            continue
           }
+          
+          // Ensure accountKeys is properly formatted (can be array of strings or AccountKey objects)
+          if (!Array.isArray(tx.transaction.message.accountKeys)) {
+            // #region agent log
+            console.log(`[DEBUG-HELIUS] Skipping transaction - invalid accountKeys format`);
+            // #endregion
+            continue
+          }
+          
+          // Use existing parser to check if this is a Meteora transaction
+          if (!isMeteoraDLMMTransaction(tx)) continue
+
+          // Determine transaction type using existing parser
+          const txType = determineTransactionType(tx)
+          
+          // Only extract position NFT from position_open transactions
+          if (txType === 'position_open') {
+            // Use existing parser to extract position NFT address
+            const positionNFT = extractPositionNFTAddress(tx, txType)
+            if (positionNFT) {
+              positionNFTs.add(positionNFT)
+              // #region agent log
+              console.log(`[DEBUG-HELIUS] Found position_open transaction with NFT: ${positionNFT.slice(0, 8)}...`);
+              // #endregion
+            } else {
+              // #region agent log
+              console.log(`[DEBUG-HELIUS] position_open transaction found but could not extract NFT address`);
+              // #endregion
+            }
+          }
+        } catch (error: any) {
+          // #region agent log
+          console.log(`[DEBUG-HELIUS] Error parsing transaction: ${error.message}`);
+          // #endregion
+          continue
         }
       }
     }
