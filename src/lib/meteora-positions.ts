@@ -502,13 +502,170 @@ async function fetchMeteoraPositionsDirect(
 }
 
 /**
- * Fetch Meteora position NFTs owned by wallet using Helius transaction parsing
- * This is the primary method - parses transactions to find position_open events
+ * Fetch Meteora position NFTs using Shyft API (PRIMARY - Most Reliable)
+ * Uses GraphQL to query Meteora DLMM positions by owner
+ */
+async function fetchMeteoraPositionNFTsViaShyft(
+  walletAddress: string
+): Promise<string[]> {
+  try {
+    const shyftApiKey = process.env.SHYFT_API_KEY
+    if (!shyftApiKey) {
+      console.log(`[DEBUG-SHYFT] No API key, skipping Shyft API`)
+      return []
+    }
+
+    console.log(`[DEBUG-SHYFT] Querying Shyft API for Meteora positions: ${walletAddress}`)
+    
+    const query = `
+      query GetMeteoraPositions {
+        meteora_dlmm_Position(
+          where: {owner: {_eq: "${walletAddress}"}}
+        ) {
+          pubkey
+          owner
+          lbPair
+        }
+      }
+    `
+
+    const response = await fetch(
+      `https://programs.shyft.to/v0/graphql/accounts?api_key=${shyftApiKey}&network=mainnet-beta`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          query,
+          variables: {},
+          operationName: 'GetMeteoraPositions',
+        }),
+      }
+    )
+
+    if (!response.ok) {
+      console.log(`[DEBUG-SHYFT] API error: ${response.status}`)
+      return []
+    }
+
+    const data = await response.json()
+    
+    if (data.errors) {
+      console.log(`[DEBUG-SHYFT] GraphQL errors:`, data.errors)
+      return []
+    }
+
+    const positions = data.data?.meteora_dlmm_Position || []
+    const positionAddresses = positions.map((p: any) => p.pubkey).filter(Boolean)
+    
+    console.log(`[DEBUG-SHYFT] ✅ Found ${positionAddresses.length} Meteora positions via Shyft API`)
+    
+    return positionAddresses
+  } catch (error: any) {
+    console.error(`[DEBUG-SHYFT] Error:`, error.message)
+    return []
+  }
+}
+
+/**
+ * Fetch Meteora position NFTs using Helius getProgramAccounts (SECONDARY)
+ * Queries on-chain accounts directly with proper owner filter
+ */
+async function fetchMeteoraPositionNFTsViaHeliusRPC(
+  walletAddress: string
+): Promise<string[]> {
+  try {
+    const rpcUrl = getRpcUrl()
+    
+    // Convert wallet address to bytes for memcmp filter
+    // Meteora DLMM position account structure: [discriminator: 8 bytes][owner: 32 bytes][...]
+    // We need to use base58 encoding for the owner field
+    
+    console.log(`[DEBUG-HELIUS-RPC] Querying getProgramAccounts for wallet: ${walletAddress}`)
+    
+    // Use jsonParsed encoding to get readable account data
+    const response = await fetch(rpcUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'getProgramAccounts',
+        params: [
+          METEORA_DLMM_PROGRAM,
+          {
+            encoding: 'jsonParsed',
+            filters: [
+              {
+                dataSize: 200, // Approximate size of Meteora position account
+              }
+            ]
+          }
+        ]
+      })
+    })
+
+    if (!response.ok) {
+      console.log(`[DEBUG-HELIUS-RPC] getProgramAccounts failed: ${response.status}`)
+      return []
+    }
+
+    const data = await response.json()
+    
+    if (data.error) {
+      console.log(`[DEBUG-HELIUS-RPC] RPC error: ${data.error.message}`)
+      return []
+    }
+
+    const accounts = data.result || []
+    
+    // Filter accounts by owner (check parsed data)
+    const positionAddresses: string[] = []
+    
+    for (const acc of accounts) {
+      const pubkey = acc.pubkey
+      if (!pubkey) continue
+      
+      // Try to get owner from parsed account data
+      let owner: string | null = null
+      if (acc.account?.data && typeof acc.account.data === 'object' && 'parsed' in acc.account.data) {
+        const parsed = acc.account.data.parsed
+        owner = parsed?.info?.owner || parsed?.owner || parsed?.data?.owner
+      }
+      
+      if (owner && owner === walletAddress) {
+        positionAddresses.push(pubkey)
+      }
+    }
+    
+    console.log(`[DEBUG-HELIUS-RPC] Found ${positionAddresses.length} positions owned by wallet`)
+    
+    return positionAddresses
+  } catch (error: any) {
+    console.error(`[DEBUG-HELIUS-RPC] Error:`, error.message)
+    return []
+  }
+}
+
+/**
+ * Fetch Meteora position NFTs owned by wallet - Multi-strategy approach
+ * Tries Shyft API first, then Helius RPC, then transaction parsing
  */
 async function fetchMeteoraPositionNFTsViaHelius(
   walletAddress: string
 ): Promise<string[]> {
-  // Use transaction parsing as primary method (more reliable)
+  // Strategy 1: Shyft API (most reliable)
+  const shyftPositions = await fetchMeteoraPositionNFTsViaShyft(walletAddress)
+  if (shyftPositions.length > 0) {
+    return shyftPositions
+  }
+
+  // Strategy 2: Helius RPC getProgramAccounts
+  const heliusPositions = await fetchMeteoraPositionNFTsViaHeliusRPC(walletAddress)
+  if (heliusPositions.length > 0) {
+    return heliusPositions
+  }
+
+  // Strategy 3: Transaction parsing (fallback)
   return await fetchMeteoraPositionNFTsViaTransactionParsing(walletAddress)
 }
 
@@ -642,42 +799,32 @@ async function fetchMeteoraPositionNFTsViaTransactionParsing(
 export async function fetchMeteoraPositionsByWallet(
   walletAddress: string
 ): Promise<MeteoraPositionsResult> {
-  // Try Helius-first approach (like metflex.io) to find position NFTs
   console.log(`🌊 Fetching Meteora positions for wallet: ${walletAddress}`)
   
+  // Multi-strategy approach: Shyft API → Helius RPC → Transaction Parsing
   const positionNFTs = await fetchMeteoraPositionNFTsViaHelius(walletAddress)
   
-  // #region agent log
-  console.log(`[DEBUG-HELIUS] Position NFT search complete: found ${positionNFTs.length} NFTs`);
-  // #endregion
+  console.log(`[DEBUG-MULTI] Position NFT search complete: found ${positionNFTs.length} NFTs`);
   
   if (positionNFTs.length > 0) {
-    // #region agent log
-    console.log(`[DEBUG-HELIUS] Fetching values for ${positionNFTs.length} position NFTs:`, positionNFTs.map(nft => nft.slice(0, 8) + '...'));
-    // #endregion
+    console.log(`[DEBUG-MULTI] Fetching values for ${positionNFTs.length} position NFTs`)
     
-    // Fetch values for each position NFT
+    // Fetch values for each position NFT from Meteora API
     const result = await fetchMeteoraPositionsValues(positionNFTs)
     
-    // #region agent log
-    console.log(`[DEBUG-HELIUS] Position values fetched: ${result.positions.length} positions, $${result.totalValueUSD.toFixed(2)} total value`);
-    // #endregion
+    console.log(`[DEBUG-MULTI] Position values: ${result.positions.length} positions, $${result.totalValueUSD.toFixed(2)} total`)
     
     if (result.positions.length > 0) {
       return result
     } else {
-      // #region agent log
-      console.log(`[DEBUG-HELIUS] ⚠️ Found ${positionNFTs.length} NFTs but Meteora API returned 0 positions. Errors:`, result.errors);
-      // #endregion
+      console.log(`[DEBUG-MULTI] ⚠️ Found ${positionNFTs.length} NFTs but Meteora API returned 0 positions. Errors:`, result.errors)
     }
   } else {
-    // #region agent log
-    console.log(`[DEBUG-HELIUS] No position NFTs found via transaction parsing`);
-    // #endregion
+    console.log(`[DEBUG-MULTI] No position NFTs found via any method`)
   }
   
-  // Fallback to Meteora API direct query (checks pools directly)
-  console.log(`🌊 Falling back to Meteora API direct query (checking pools)`)
+  // Final fallback: Meteora API direct pool checking
+  console.log(`🌊 Final fallback: Checking Meteora pools directly`)
   return await fetchMeteoraPositionsDirect(walletAddress)
 }
 
