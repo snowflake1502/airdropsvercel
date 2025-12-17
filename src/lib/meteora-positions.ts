@@ -3,6 +3,13 @@
  * Fetches real-time position values directly from Meteora's API
  */
 
+import {
+  isMeteoraDLMMTransaction,
+  determineTransactionType,
+  extractPositionNFTAddress,
+  type ParsedTransaction,
+} from './meteora-transaction-parser'
+
 export interface MeteoraPositionValue {
   positionAddress: string
   pairAddress: string
@@ -495,9 +502,8 @@ async function fetchMeteoraPositionsDirect(
 }
 
 /**
- * Fetch Meteora position accounts owned by wallet using Helius getProgramAccounts
- * This replicates what Meteora SDK's getAllLbPairPositionsByUser does
- * Queries on-chain accounts directly (works for both active and closed positions)
+ * Fetch Meteora position NFTs owned by wallet using Helius transaction parsing
+ * Parses recent transactions to find position_open transactions and extract position NFT addresses
  */
 async function fetchMeteoraPositionNFTsViaHelius(
   walletAddress: string
@@ -506,61 +512,109 @@ async function fetchMeteoraPositionNFTsViaHelius(
     const rpcUrl = getRpcUrl()
     
     // #region agent log
-    console.log(`[DEBUG-HELIUS] Querying Meteora DLMM position accounts for wallet: ${walletAddress}`);
+    console.log(`[DEBUG-HELIUS] Querying transactions for wallet: ${walletAddress}`);
     // #endregion
 
-    // Use getProgramAccounts to find all Meteora DLMM position accounts owned by this wallet
-    // This is what Meteora SDK does internally
-    const response = await fetch(rpcUrl, {
+    // Get recent transaction signatures (last 100 should cover recent positions)
+    const sigResponse = await fetch(rpcUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         jsonrpc: '2.0',
         id: 1,
-        method: 'getProgramAccounts',
-        params: [
-          METEORA_DLMM_PROGRAM,
-          {
-            encoding: 'base64',
-            filters: [
-              {
-                memcmp: {
-                  offset: 8, // Skip discriminator (8 bytes)
-                  bytes: walletAddress, // Filter by owner address
-                }
-              }
-            ]
-          }
-        ]
+        method: 'getSignaturesForAddress',
+        params: [walletAddress, { limit: 100 }]
       })
     })
 
-    if (!response.ok) {
-      console.warn(`Helius getProgramAccounts error: ${response.status}`)
-      return []
-    }
-
-    const data = await response.json()
-    
-    if (data.error) {
+    if (!sigResponse.ok) {
       // #region agent log
-      console.log(`[DEBUG-HELIUS] getProgramAccounts error: ${data.error.message}`);
+      console.log(`[DEBUG-HELIUS] getSignaturesForAddress failed: ${sigResponse.status}`);
       // #endregion
       return []
     }
 
-    const accounts = data.result || []
-    
-    // Extract position account addresses (these are the position NFT addresses)
-    const positionAddresses = accounts.map((acc: any) => acc.pubkey)
+    const sigData = await sigResponse.json()
+    if (sigData.error) {
+      // #region agent log
+      console.log(`[DEBUG-HELIUS] getSignaturesForAddress error: ${sigData.error.message}`);
+      // #endregion
+      return []
+    }
+
+    const signatures = sigData.result || []
     
     // #region agent log
-    console.log(`[DEBUG-HELIUS] Found ${positionAddresses.length} Meteora position accounts`);
+    console.log(`[DEBUG-HELIUS] Found ${signatures.length} transaction signatures`);
+    // #endregion
+
+    if (signatures.length === 0) {
+      return []
+    }
+
+    // Fetch transaction details in batches (limit to 20 most recent for performance)
+    const recentSignatures = signatures.slice(0, 20).map((s: any) => s.signature)
+    const positionNFTs = new Set<string>()
+
+    // Fetch transactions in parallel (but limit concurrency)
+    const batchSize = 5
+    for (let i = 0; i < recentSignatures.length; i += batchSize) {
+      const batch = recentSignatures.slice(i, i + batchSize)
+      const txPromises = batch.map(sig => 
+        fetch(rpcUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            id: 1,
+            method: 'getTransaction',
+            params: [
+              sig,
+              {
+                encoding: 'jsonParsed',
+                maxSupportedTransactionVersion: 0
+              }
+            ]
+          })
+        }).then(r => r.json()).catch(() => null)
+      )
+
+      const txResults = await Promise.all(txPromises)
+      
+      for (const txData of txResults) {
+        if (!txData?.result?.transaction) continue
+        
+        const tx = txData.result.transaction as ParsedTransaction
+        
+        // Use existing parser to check if this is a Meteora transaction
+        if (!isMeteoraDLMMTransaction(tx)) continue
+
+        // Determine transaction type using existing parser
+        const txType = determineTransactionType(tx)
+        
+        // Only extract position NFT from position_open transactions
+        if (txType === 'position_open') {
+          // Use existing parser to extract position NFT address
+          const positionNFT = extractPositionNFTAddress(tx, txType)
+          if (positionNFT) {
+            positionNFTs.add(positionNFT)
+            // #region agent log
+            console.log(`[DEBUG-HELIUS] Found position_open transaction with NFT: ${positionNFT.slice(0, 8)}...`);
+            // #endregion
+          }
+        }
+      }
+    }
+
+    const positionAddresses = Array.from(positionNFTs)
+    
+    // #region agent log
+    console.log(`[DEBUG-HELIUS] Found ${positionAddresses.length} Meteora position NFTs from transaction parsing`);
     // #endregion
 
     return positionAddresses
   } catch (error: any) {
-    console.error(`Error fetching Meteora positions via Helius:`, error.message)
+    console.error(`Error fetching Meteora NFTs via Helius:`, error.message)
     return []
   }
 }

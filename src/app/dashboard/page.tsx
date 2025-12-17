@@ -265,31 +265,32 @@ export default function HomePage() {
       }
 
       // Fetch real-time Meteora LP position values from API
+      // Always call API to detect new positions even if database shows 0
       let meteoraLPValueUSD = 0
       let meteoraUnclaimedFees = 0
-      if (activePositionCount > 0) {
-        try {
-          // Get auth session for API call (needed for RLS)
-          const { data: { session } } = await supabase.auth.getSession()
-          const headers: HeadersInit = session?.access_token 
-            ? { 'Authorization': `Bearer ${session.access_token}` }
-            : {}
-          
-          const meteoraResponse = await fetch(
-            `/api/meteora/positions-value?walletAddress=${walletAddress}&userId=${user.id}`,
-            { headers }
-          )
-          if (meteoraResponse.ok) {
-            const meteoraData = await meteoraResponse.json()
-            if (meteoraData.success) {
-              meteoraLPValueUSD = meteoraData.totalValueUSD || 0
-              meteoraUnclaimedFees = meteoraData.totalUnclaimedFeesUSD || 0
-              console.log(`🌊 Real-time Meteora LP value: $${meteoraLPValueUSD.toFixed(2)} (unclaimed fees: $${meteoraUnclaimedFees.toFixed(2)})`)
-            }
+      try {
+        // Get auth session for API call (needed for RLS)
+        const { data: { session } } = await supabase.auth.getSession()
+        const headers: HeadersInit = session?.access_token 
+          ? { 'Authorization': `Bearer ${session.access_token}` }
+          : {}
+        
+        const meteoraResponse = await fetch(
+          `/api/meteora/positions-value?walletAddress=${walletAddress}&userId=${user.id}`,
+          { headers }
+        )
+        if (meteoraResponse.ok) {
+          const meteoraData = await meteoraResponse.json()
+          if (meteoraData.success) {
+            meteoraLPValueUSD = meteoraData.totalValueUSD || 0
+            meteoraUnclaimedFees = meteoraData.totalUnclaimedFeesUSD || 0
+            console.log(`🌊 Real-time Meteora LP value: $${meteoraLPValueUSD.toFixed(2)} (unclaimed fees: $${meteoraUnclaimedFees.toFixed(2)})`)
           }
-        } catch (meteoraError) {
-          console.warn('Could not fetch real-time Meteora values, falling back to estimate:', meteoraError)
-          // Fallback to historical estimate if API fails
+        }
+      } catch (meteoraError) {
+        console.warn('Could not fetch real-time Meteora values, falling back to estimate:', meteoraError)
+        // Fallback to historical estimate if API fails (only if we have database positions)
+        if (activePositionCount > 0) {
           nftOpenCounts.forEach((openCount, nft) => {
             const closeCount = nftCloseCounts.get(nft) || 0
             const netPositions = openCount - closeCount
