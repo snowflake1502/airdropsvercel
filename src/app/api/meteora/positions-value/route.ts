@@ -39,12 +39,15 @@ export async function GET(request: NextRequest) {
     // #region agent log
     // List ALL env var names (not values) to debug what's available
     const allEnvKeys = Object.keys(process.env).filter(k => 
-      k.includes('JUPITER') || k.includes('SUPABASE') || k.includes('HELIUS') || k.includes('API')
+      k.includes('JUPITER') || k.includes('SUPABASE') || k.includes('HELIUS') || k.includes('API') || k.includes('SHYFT')
     );
     console.log('[DEBUG-ENV] Environment check:', JSON.stringify({
       hasJupiterKey: !!process.env.JUPITER_API_KEY,
       jupiterKeyLength: process.env.JUPITER_API_KEY?.length || 0,
+      hasShyftKey: !!process.env.SHYFT_API_KEY,
+      shyftKeyLength: process.env.SHYFT_API_KEY?.length || 0,
       hasSupabaseUrl: !!process.env.NEXT_PUBLIC_SUPABASE_URL,
+      hasHeliusRpc: !!process.env.HELIUS_RPC_URL,
       nodeEnv: process.env.NODE_ENV,
       relevantEnvKeys: allEnvKeys,
     }));

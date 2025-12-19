@@ -517,10 +517,18 @@ async function fetchMeteoraPositionNFTsViaShyft(
 
     console.log(`[DEBUG-SHYFT] Querying Shyft API for Meteora positions: ${walletAddress}`)
     
+    // Query both Position and PositionV2 (Meteora has two position types)
     const query = `
       query GetMeteoraPositions {
         meteora_dlmm_Position(
-          where: {owner: {_eq: "${walletAddress}"}}
+          where: {owner: {_eq: ${JSON.stringify(walletAddress)}}}
+        ) {
+          pubkey
+          owner
+          lbPair
+        }
+        meteora_dlmm_PositionV2(
+          where: {owner: {_eq: ${JSON.stringify(walletAddress)}}}
         ) {
           pubkey
           owner
@@ -529,39 +537,48 @@ async function fetchMeteoraPositionNFTsViaShyft(
       }
     `
 
-    const response = await fetch(
-      `https://programs.shyft.to/v0/graphql/accounts?api_key=${shyftApiKey}&network=mainnet-beta`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          query,
-          variables: {},
-          operationName: 'GetMeteoraPositions',
-        }),
-      }
-    )
+    const endpoint = `https://programs.shyft.to/v0/graphql/accounts?api_key=${shyftApiKey}&network=mainnet-beta`
+    
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        query,
+        variables: {},
+        operationName: 'GetMeteoraPositions',
+      }),
+    })
 
     if (!response.ok) {
-      console.log(`[DEBUG-SHYFT] API error: ${response.status}`)
+      const errorText = await response.text().catch(() => '')
+      console.log(`[DEBUG-SHYFT] API error ${response.status}: ${errorText.slice(0, 200)}`)
       return []
     }
 
     const data = await response.json()
     
     if (data.errors) {
-      console.log(`[DEBUG-SHYFT] GraphQL errors:`, data.errors)
+      console.log(`[DEBUG-SHYFT] GraphQL errors:`, JSON.stringify(data.errors))
       return []
     }
 
-    const positions = data.data?.meteora_dlmm_Position || []
-    const positionAddresses = positions.map((p: any) => p.pubkey).filter(Boolean)
+    // Combine Position and PositionV2 results
+    const positionsV1 = data.data?.meteora_dlmm_Position || []
+    const positionsV2 = data.data?.meteora_dlmm_PositionV2 || []
+    const allPositions = [...positionsV1, ...positionsV2]
     
-    console.log(`[DEBUG-SHYFT] ✅ Found ${positionAddresses.length} Meteora positions via Shyft API`)
+    // Extract pubkey (position NFT address)
+    const positionAddresses = allPositions.map((p: any) => p.pubkey).filter(Boolean)
+    
+    console.log(`[DEBUG-SHYFT] ✅ Found ${positionAddresses.length} Meteora positions (${positionsV1.length} V1, ${positionsV2.length} V2) via Shyft API`)
+    
+    if (positionAddresses.length > 0) {
+      console.log(`[DEBUG-SHYFT] Position addresses:`, positionAddresses.map((addr: string) => addr.slice(0, 8) + '...'))
+    }
     
     return positionAddresses
   } catch (error: any) {
-    console.error(`[DEBUG-SHYFT] Error:`, error.message)
+    console.error(`[DEBUG-SHYFT] Error:`, error.message, error.stack)
     return []
   }
 }
