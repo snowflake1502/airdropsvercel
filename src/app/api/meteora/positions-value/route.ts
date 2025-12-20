@@ -146,7 +146,18 @@ export async function GET(request: NextRequest) {
     console.log(`🌊 Fetched ${result.positions.length} positions with total value: $${result.totalValueUSD.toFixed(2)}`)
 
     // #region agent log
-    console.log('[DEBUG-FINAL] API result:', JSON.stringify({totalValueUSD:result.totalValueUSD,totalUnclaimedFeesUSD:result.totalUnclaimedFeesUSD,positionsCount:result.positions.length,positions:result.positions.map(p=>({addr:p.positionAddress,pair:p.pairName,valueUSD:p.totalValueUSD,fees:p.unclaimedFeesUSD}))}));
+    console.log('[DEBUG-FINAL] API result:', JSON.stringify({
+      totalValueUSD: result.totalValueUSD,
+      totalUnclaimedFeesUSD: result.totalUnclaimedFeesUSD,
+      positionsCount: result.positions.length,
+      positions: result.positions.map(p => ({
+        addr: p.positionAddress,
+        pair: p.pairName,
+        valueUSD: p.totalValueUSD,
+        fees: p.unclaimedFeesUSD
+      })),
+      errors: result.errors,
+    }));
     // #endregion
 
     return NextResponse.json({
@@ -155,6 +166,15 @@ export async function GET(request: NextRequest) {
       totalUnclaimedFeesUSD: result.totalUnclaimedFeesUSD,
       positions: result.positions,
       errors: result.errors.length > 0 ? result.errors : undefined,
+      // Debug info to help troubleshoot
+      debug: {
+        walletAddress,
+        positionsFound: result.positions.length,
+        totalValue: result.totalValueUSD,
+        errors: result.errors,
+        hasShyftKey: !!process.env.SHYFT_API_KEY,
+        hasHeliusRpc: !!process.env.HELIUS_RPC_URL,
+      },
     })
   } catch (error: any) {
     console.error('Error fetching Meteora positions value:', error)

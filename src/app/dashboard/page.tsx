@@ -275,18 +275,31 @@ export default function HomePage() {
           ? { 'Authorization': `Bearer ${session.access_token}` }
           : {}
         
-        const meteoraResponse = await fetch(
-          `/api/meteora/positions-value?walletAddress=${walletAddress}&userId=${user.id}`,
-          { headers }
-        )
-        if (meteoraResponse.ok) {
-          const meteoraData = await meteoraResponse.json()
-          if (meteoraData.success) {
-            meteoraLPValueUSD = meteoraData.totalValueUSD || 0
-            meteoraUnclaimedFees = meteoraData.totalUnclaimedFeesUSD || 0
-            console.log(`🌊 Real-time Meteora LP value: $${meteoraLPValueUSD.toFixed(2)} (unclaimed fees: $${meteoraUnclaimedFees.toFixed(2)})`)
+          const meteoraResponse = await fetch(
+            `/api/meteora/positions-value?walletAddress=${walletAddress}&userId=${user.id}`,
+            { headers }
+          )
+          if (meteoraResponse.ok) {
+            const meteoraData = await meteoraResponse.json()
+            if (meteoraData.success) {
+              meteoraLPValueUSD = meteoraData.totalValueUSD || 0
+              meteoraUnclaimedFees = meteoraData.totalUnclaimedFeesUSD || 0
+              console.log(`🌊 Real-time Meteora LP value: $${meteoraLPValueUSD.toFixed(2)} (unclaimed fees: $${meteoraUnclaimedFees.toFixed(2)})`)
+              
+              // Debug info
+              if (meteoraData.debug) {
+                console.log(`[DEBUG-API] Meteora API debug:`, meteoraData.debug)
+              }
+              if (meteoraData.errors && meteoraData.errors.length > 0) {
+                console.warn(`[DEBUG-API] Meteora API errors:`, meteoraData.errors)
+              }
+            } else {
+              console.warn(`[DEBUG-API] Meteora API returned success=false:`, meteoraData)
+            }
+          } else {
+            const errorData = await meteoraResponse.json().catch(() => ({}))
+            console.error(`[DEBUG-API] Meteora API error ${meteoraResponse.status}:`, errorData)
           }
-        }
       } catch (meteoraError) {
         console.warn('Could not fetch real-time Meteora values, falling back to estimate:', meteoraError)
         // Fallback to historical estimate if API fails (only if we have database positions)
