@@ -200,8 +200,9 @@ export async function fetchMeteoraPositionValue(
     }));
     // #endregion
 
-    // Step 3: Try to get token amounts from position data directly first
-    // Meteora position API might have token amounts in the response
+    // Step 3: Get token amounts
+    // Meteora position API doesn't return token amounts directly
+    // We need to calculate from liquidity shares or query associated token accounts
     let tokenXAmount = 0
     let tokenYAmount = 0
     let unclaimedFeeX = 0
@@ -211,23 +212,68 @@ export async function fetchMeteoraPositionValue(
     const tokenXDecimals = pairData.mint_x_decimals || 9
     const tokenYDecimals = pairData.mint_y_decimals || 6
     
-    // Try getting amounts from position data directly
-    if (positionData.total_x_amount !== undefined || positionData.total_y_amount !== undefined) {
-      tokenXAmount = Number(positionData.total_x_amount || 0) / Math.pow(10, tokenXDecimals)
-      tokenYAmount = Number(positionData.total_y_amount || 0) / Math.pow(10, tokenYDecimals)
-      unclaimedFeeX = Number(positionData.fee_x || 0) / Math.pow(10, tokenXDecimals)
-      unclaimedFeeY = Number(positionData.fee_y || 0) / Math.pow(10, tokenYDecimals)
+    // Try to get token amounts by querying token accounts owned by the position NFT
+    // Meteora positions may have associated token accounts holding the liquidity
+    try {
+      const rpcUrl = getRpcUrl()
       
-      // #region agent log
-      console.log('[DEBUG-B3] Got amounts from position data:', JSON.stringify({
-        tokenXAmount,
-        tokenYAmount,
-        unclaimedFeeX,
-        unclaimedFeeY,
-      }));
-      // #endregion
-    } else {
-      // Fallback: Try user positions endpoint
+      // Query for token accounts owned by the position address
+      const tokenAccountsResponse = await fetch(rpcUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'getTokenAccountsByOwner',
+          params: [
+            positionAddress,
+            {
+              programId: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA'
+            },
+            {
+              encoding: 'jsonParsed'
+            }
+          ]
+        })
+      })
+      
+      if (tokenAccountsResponse.ok) {
+        const tokenAccountsData = await tokenAccountsResponse.json()
+        const tokenAccounts = tokenAccountsData.result?.value || []
+        
+        // #region agent log
+        console.log('[DEBUG-B3] Token accounts for position:', JSON.stringify({
+          tokenAccountsCount: tokenAccounts.length,
+          accounts: tokenAccounts.map((acc: any) => ({
+            mint: acc.account?.data?.parsed?.info?.mint,
+            amount: acc.account?.data?.parsed?.info?.tokenAmount?.uiAmount,
+          })),
+        }));
+        // #endregion
+        
+        // Extract token amounts from token accounts
+        for (const account of tokenAccounts) {
+          const mint = account.account?.data?.parsed?.info?.mint
+          const amount = account.account?.data?.parsed?.info?.tokenAmount?.uiAmount || 0
+          
+          if (mint === pairData.mint_x && amount > 0) {
+            tokenXAmount = amount
+          } else if (mint === pairData.mint_y && amount > 0) {
+            tokenYAmount = amount
+          }
+        }
+        
+        if (tokenXAmount > 0 || tokenYAmount > 0) {
+          console.log('[DEBUG-B3] ✅ Got token amounts from token accounts:', { tokenXAmount, tokenYAmount })
+        }
+      }
+    } catch (error: any) {
+      console.log('[DEBUG-B3] Error fetching token accounts:', error.message)
+    }
+    
+    // If token accounts didn't work, try user positions endpoint as fallback:
+    if (tokenXAmount === 0 && tokenYAmount === 0) {
+      // Try user positions endpoint (may work for some pools)
       const userPositionsResponse = await fetch(
         `https://dlmm-api.meteora.ag/pair/${positionData.pair_address}/user/${positionData.owner}`,
         {
@@ -251,14 +297,15 @@ export async function fetchMeteoraPositionValue(
           (p: any) => p.position_address === positionAddress || p.public_key === positionAddress
         )
 
-        if (specificPosition) {
+        if (specificPosition && specificPosition.position_data) {
           // #region agent log
           console.log('[DEBUG-B5] Found specific position:', JSON.stringify({
             positionAddress,
-            hasPositionData: !!specificPosition.position_data,
-            positionDataKeys: specificPosition.position_data ? Object.keys(specificPosition.position_data) : [],
+            positionDataKeys: Object.keys(specificPosition.position_data),
             raw_total_x: specificPosition.position_data?.total_x_amount,
             raw_total_y: specificPosition.position_data?.total_y_amount,
+            raw_fee_x: specificPosition.position_data?.fee_x,
+            raw_fee_y: specificPosition.position_data?.fee_y,
           }));
           // #endregion
           
@@ -275,18 +322,29 @@ export async function fetchMeteoraPositionValue(
           if (lowerBinId !== undefined && upperBinId !== undefined && activeBinId !== undefined) {
             isOutOfRange = activeBinId < lowerBinId || activeBinId > upperBinId
           }
-        } else {
-          // #region agent log
-          console.log('[DEBUG-B6] Position not found in user_positions, trying all positions');
-          // #endregion
         }
       } else {
         // #region agent log
         const errorText = await userPositionsResponse.text().catch(() => '')
         console.log('[DEBUG-B7] User positions endpoint failed:', userPositionsResponse.status, errorText.slice(0, 200));
         // #endregion
+        
+        // If user positions endpoint fails, the position might be empty or closed
+        // Check if we can get amounts from Shyft API position data
+        // Shyft might have more detailed position information
+        console.log('[DEBUG-B8] User positions endpoint unavailable, position may be empty or we need Shyft detailed query')
       }
     }
+    
+    // #region agent log
+    console.log('[DEBUG-B9] Final token amounts:', JSON.stringify({
+      tokenXAmount,
+      tokenYAmount,
+      unclaimedFeeX,
+      unclaimedFeeY,
+      isOutOfRange,
+    }));
+    // #endregion
 
     // Determine token prices
     const tokenXMint = pairData.mint_x
@@ -580,7 +638,7 @@ async function fetchMeteoraPositionNFTsViaShyft(
 
     console.log(`[DEBUG-SHYFT] Querying Shyft API for Meteora positions: ${walletAddress}`)
     
-    // Query both Position and PositionV2 (Meteora has two position types)
+    // Query both Position and PositionV2 with detailed data including token amounts
     const query = `
       query GetMeteoraPositions {
         meteora_dlmm_Position(
@@ -589,6 +647,11 @@ async function fetchMeteoraPositionNFTsViaShyft(
           pubkey
           owner
           lbPair
+          lowerBinId
+          upperBinId
+          liquidityShares
+          totalClaimedFeeXAmount
+          totalClaimedFeeYAmount
         }
         meteora_dlmm_PositionV2(
           where: {owner: {_eq: ${JSON.stringify(walletAddress)}}}
@@ -596,6 +659,11 @@ async function fetchMeteoraPositionNFTsViaShyft(
           pubkey
           owner
           lbPair
+          lowerBinId
+          upperBinId
+          liquidityShares
+          totalClaimedFeeXAmount
+          totalClaimedFeeYAmount
         }
       }
     `
@@ -630,13 +698,22 @@ async function fetchMeteoraPositionNFTsViaShyft(
     const positionsV2 = data.data?.meteora_dlmm_PositionV2 || []
     const allPositions = [...positionsV1, ...positionsV2]
     
-    // Extract pubkey (position NFT address)
+    // Extract pubkey (position NFT address) and store position data for later use
     const positionAddresses = allPositions.map((p: any) => p.pubkey).filter(Boolean)
     
     console.log(`[DEBUG-SHYFT] ✅ Found ${positionAddresses.length} Meteora positions (${positionsV1.length} V1, ${positionsV2.length} V2) via Shyft API`)
     
     if (positionAddresses.length > 0) {
       console.log(`[DEBUG-SHYFT] Position addresses:`, positionAddresses.map((addr: string) => addr.slice(0, 8) + '...'))
+      // Log position details from Shyft
+      allPositions.forEach((p: any) => {
+        console.log(`[DEBUG-SHYFT] Position ${p.pubkey.slice(0, 8)}...:`, JSON.stringify({
+          lbPair: p.lbPair?.slice(0, 8),
+          lowerBinId: p.lowerBinId,
+          upperBinId: p.upperBinId,
+          liquidityShares: p.liquidityShares,
+        }))
+      })
     }
     
     return positionAddresses
