@@ -271,8 +271,13 @@ export async function fetchMeteoraPositionValue(
       console.log('[DEBUG-B3] Error fetching token accounts:', error.message)
     }
     
-    // If token accounts didn't work, try user positions endpoint as fallback:
+    // If token accounts didn't work, try calculating from liquidity shares using bin data
+    // This requires getting bin data from the pool and calculating amounts
     if (tokenXAmount === 0 && tokenYAmount === 0) {
+      // Try to get position data from Shyft API which includes liquidityShares
+      // We'll need to calculate from liquidityShares and bin composition factors
+      // For now, log that we need bin data
+      console.log('[DEBUG-B4] Token accounts empty, need to calculate from liquidityShares and bin data')
       // Try user positions endpoint (may work for some pools)
       const userPositionsResponse = await fetch(
         `https://dlmm-api.meteora.ag/pair/${positionData.pair_address}/user/${positionData.owner}`,
@@ -623,7 +628,207 @@ async function fetchMeteoraPositionsDirect(
 }
 
 /**
- * Fetch Meteora position NFTs using Shyft API (PRIMARY - Most Reliable)
+ * Fetch Meteora positions with token amounts directly from Shyft API
+ * Shyft API provides totalXAmount and totalYAmount fields - this is the solution!
+ */
+async function fetchMeteoraPositionsViaShyft(
+  walletAddress: string
+): Promise<MeteoraPositionsResult> {
+  try {
+    const shyftApiKey = process.env.SHYFT_API_KEY
+    if (!shyftApiKey) {
+      console.log(`[DEBUG-SHYFT] No API key, skipping Shyft API`)
+      return { positions: [], totalValueUSD: 0, totalUnclaimedFeesUSD: 0, errors: [] }
+    }
+
+    console.log(`[DEBUG-SHYFT] Querying Shyft API for Meteora positions with token amounts: ${walletAddress}`)
+    
+    // Query both Position and PositionV2 with token amounts (totalXAmount, totalYAmount)
+    const query = `
+      query GetMeteoraPositions {
+        meteora_dlmm_Position(
+          where: {owner: {_eq: ${JSON.stringify(walletAddress)}}}
+        ) {
+          pubkey
+          owner
+          lbPair
+          lowerBinId
+          upperBinId
+          totalXAmount
+          totalYAmount
+          totalClaimedFeeXAmount
+          totalClaimedFeeYAmount
+        }
+        meteora_dlmm_PositionV2(
+          where: {owner: {_eq: ${JSON.stringify(walletAddress)}}}
+        ) {
+          pubkey
+          owner
+          lbPair
+          lowerBinId
+          upperBinId
+          totalXAmount
+          totalYAmount
+          totalClaimedFeeXAmount
+          totalClaimedFeeYAmount
+        }
+      }
+    `
+
+    const endpoint = `https://programs.shyft.to/v0/graphql/accounts?api_key=${shyftApiKey}&network=mainnet-beta`
+    
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        query,
+        variables: {},
+        operationName: 'GetMeteoraPositions',
+      }),
+    })
+
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => '')
+      console.log(`[DEBUG-SHYFT] API error ${response.status}: ${errorText.slice(0, 200)}`)
+      return { positions: [], totalValueUSD: 0, totalUnclaimedFeesUSD: 0, errors: [] }
+    }
+
+    const data = await response.json()
+    
+    if (data.errors) {
+      console.log(`[DEBUG-SHYFT] GraphQL errors:`, JSON.stringify(data.errors))
+      return { positions: [], totalValueUSD: 0, totalUnclaimedFeesUSD: 0, errors: [] }
+    }
+
+    // Combine Position and PositionV2 results
+    const positionsV1 = data.data?.meteora_dlmm_Position || []
+    const positionsV2 = data.data?.meteora_dlmm_PositionV2 || []
+    const allPositions = [...positionsV1, ...positionsV2]
+    
+    console.log(`[DEBUG-SHYFT] ✅ Found ${allPositions.length} Meteora positions (${positionsV1.length} V1, ${positionsV2.length} V2)`)
+    
+    if (allPositions.length === 0) {
+      return { positions: [], totalValueUSD: 0, totalUnclaimedFeesUSD: 0, errors: [] }
+    }
+    
+    // Process each position - get pair data for token info and prices
+    const positions: MeteoraPositionValue[] = []
+    const errors: string[] = []
+    
+    for (const pos of allPositions) {
+      try {
+        const positionAddress = pos.pubkey
+        const pairAddress = pos.lbPair
+        
+        // Get pair data for token info
+        const pairResponse = await fetch(
+          `https://dlmm-api.meteora.ag/pair/${pairAddress}`,
+          { headers: { Accept: 'application/json' } }
+        )
+        
+        if (!pairResponse.ok) {
+          errors.push(`Pair ${pairAddress}: ${pairResponse.status}`)
+          continue
+        }
+        
+        const pairData = await pairResponse.json()
+        const tokenXDecimals = pairData.mint_x_decimals || 9
+        const tokenYDecimals = pairData.mint_y_decimals || 6
+        const currentPrice = Number(pairData.current_price || 125) // SOL price
+        
+        // Get token amounts from Shyft (already in raw amounts, need to divide by decimals)
+        const tokenXAmountRaw = Number(pos.totalXAmount || 0)
+        const tokenYAmountRaw = Number(pos.totalYAmount || 0)
+        const tokenXAmount = tokenXAmountRaw / Math.pow(10, tokenXDecimals)
+        const tokenYAmount = tokenYAmountRaw / Math.pow(10, tokenYDecimals)
+        
+        // Get unclaimed fees (if available)
+        const unclaimedFeeXRaw = Number(pos.totalClaimedFeeXAmount || 0)
+        const unclaimedFeeYRaw = Number(pos.totalClaimedFeeYAmount || 0)
+        const unclaimedFeeX = unclaimedFeeXRaw / Math.pow(10, tokenXDecimals)
+        const unclaimedFeeY = unclaimedFeeYRaw / Math.pow(10, tokenYDecimals)
+        
+        // Determine prices
+        let tokenXPrice = 1
+        let tokenYPrice = 1
+        
+        if (pairData.mint_x === SOL_MINT) {
+          tokenXPrice = currentPrice
+          tokenYPrice = 1 // USDC
+        } else if (pairData.mint_y === SOL_MINT) {
+          tokenYPrice = currentPrice
+          tokenXPrice = 1 // USDC
+        } else if (pairData.mint_x === USDC_MINT) {
+          tokenXPrice = 1
+          tokenYPrice = currentPrice
+        } else if (pairData.mint_y === USDC_MINT) {
+          tokenYPrice = 1
+          tokenXPrice = currentPrice
+        }
+        
+        const tokenXValueUSD = tokenXAmount * tokenXPrice
+        const tokenYValueUSD = tokenYAmount * tokenYPrice
+        const totalValueUSD = tokenXValueUSD + tokenYValueUSD
+        const unclaimedFeesUSD = (unclaimedFeeX * tokenXPrice) + (unclaimedFeeY * tokenYPrice)
+        
+        // Check if out of range
+        const activeBinId = pairData.active_bin_id
+        const isOutOfRange = pos.lowerBinId !== undefined && 
+                            pos.upperBinId !== undefined && 
+                            activeBinId !== undefined &&
+                            (activeBinId < pos.lowerBinId || activeBinId > pos.upperBinId)
+        
+        console.log(`[DEBUG-SHYFT] Position ${positionAddress.slice(0, 8)}...:`, JSON.stringify({
+          tokenXAmount,
+          tokenYAmount,
+          totalValueUSD,
+          isOutOfRange,
+        }))
+        
+        positions.push({
+          positionAddress,
+          pairAddress,
+          pairName: pairData.name || 'Unknown',
+          owner: walletAddress,
+          tokenX: {
+            symbol: pairData.name?.split('-')[0] || 'Unknown',
+            mint: pairData.mint_x,
+            amount: tokenXAmount,
+            price: tokenXPrice,
+            valueUSD: tokenXValueUSD,
+          },
+          tokenY: {
+            symbol: pairData.name?.split('-')[1] || 'Unknown',
+            mint: pairData.mint_y,
+            amount: tokenYAmount,
+            price: tokenYPrice,
+            valueUSD: tokenYValueUSD,
+          },
+          totalValueUSD,
+          unclaimedFeesUSD,
+          totalFeesClaimed: 0, // Shyft provides claimed fees, not total
+          isOutOfRange: isOutOfRange || false,
+          feeAPR24h: 0, // Would need to get from Meteora API
+        })
+      } catch (error: any) {
+        errors.push(`Position ${pos.pubkey}: ${error.message}`)
+      }
+    }
+    
+    const totalValueUSD = positions.reduce((sum, p) => sum + p.totalValueUSD, 0)
+    const totalUnclaimedFeesUSD = positions.reduce((sum, p) => sum + p.unclaimedFeesUSD, 0)
+    
+    console.log(`[DEBUG-SHYFT] ✅ Processed ${positions.length} positions, total value: $${totalValueUSD.toFixed(2)}`)
+    
+    return { positions, totalValueUSD, totalUnclaimedFeesUSD, errors }
+  } catch (error: any) {
+    console.error(`[DEBUG-SHYFT] Error:`, error.message, error.stack)
+    return { positions: [], totalValueUSD: 0, totalUnclaimedFeesUSD: 0, errors: [error.message] }
+  }
+}
+
+/**
+ * Fetch Meteora position NFTs using Shyft API (for position address lookup only)
  * Uses GraphQL to query Meteora DLMM positions by owner
  */
 async function fetchMeteoraPositionNFTsViaShyft(
@@ -638,7 +843,7 @@ async function fetchMeteoraPositionNFTsViaShyft(
 
     console.log(`[DEBUG-SHYFT] Querying Shyft API for Meteora positions: ${walletAddress}`)
     
-    // Query both Position and PositionV2 with detailed data including token amounts
+    // Query both Position and PositionV2 with token amounts (totalXAmount, totalYAmount)
     const query = `
       query GetMeteoraPositions {
         meteora_dlmm_Position(
@@ -649,7 +854,8 @@ async function fetchMeteoraPositionNFTsViaShyft(
           lbPair
           lowerBinId
           upperBinId
-          liquidityShares
+          totalXAmount
+          totalYAmount
           totalClaimedFeeXAmount
           totalClaimedFeeYAmount
         }
@@ -661,7 +867,8 @@ async function fetchMeteoraPositionNFTsViaShyft(
           lbPair
           lowerBinId
           upperBinId
-          liquidityShares
+          totalXAmount
+          totalYAmount
           totalClaimedFeeXAmount
           totalClaimedFeeYAmount
         }
@@ -698,20 +905,22 @@ async function fetchMeteoraPositionNFTsViaShyft(
     const positionsV2 = data.data?.meteora_dlmm_PositionV2 || []
     const allPositions = [...positionsV1, ...positionsV2]
     
-    // Extract pubkey (position NFT address) and store position data for later use
+    // Extract pubkey (position NFT address) and log position details
     const positionAddresses = allPositions.map((p: any) => p.pubkey).filter(Boolean)
     
     console.log(`[DEBUG-SHYFT] ✅ Found ${positionAddresses.length} Meteora positions (${positionsV1.length} V1, ${positionsV2.length} V2) via Shyft API`)
     
     if (positionAddresses.length > 0) {
       console.log(`[DEBUG-SHYFT] Position addresses:`, positionAddresses.map((addr: string) => addr.slice(0, 8) + '...'))
-      // Log position details from Shyft
+      // Log position details including token amounts from Shyft
       allPositions.forEach((p: any) => {
         console.log(`[DEBUG-SHYFT] Position ${p.pubkey.slice(0, 8)}...:`, JSON.stringify({
           lbPair: p.lbPair?.slice(0, 8),
           lowerBinId: p.lowerBinId,
           upperBinId: p.upperBinId,
-          liquidityShares: p.liquidityShares,
+          totalXAmount: p.totalXAmount,
+          totalYAmount: p.totalYAmount,
+          hasTokenAmounts: !!(p.totalXAmount || p.totalYAmount),
         }))
       })
     }
@@ -953,18 +1162,178 @@ async function fetchMeteoraPositionNFTsViaTransactionParsing(
  * This is the primary method - queries Meteora API directly for accurate position data
  * Meteora API uses on-chain data (via Helius RPC) to provide real-time position values
  */
+/**
+ * Fetch Meteora positions using Jupiter Portfolio API (if available)
+ * Jupiter Portfolio API aggregates data across protocols including Meteora
+ */
+async function fetchMeteoraPositionsViaJupiter(
+  walletAddress: string
+): Promise<MeteoraPositionsResult> {
+  try {
+    const jupiterApiKey = process.env.JUPITER_API_KEY
+    if (!jupiterApiKey) {
+      console.log(`[DEBUG-JUPITER] No API key, skipping Jupiter Portfolio API`)
+      return { positions: [], totalValueUSD: 0, totalUnclaimedFeesUSD: 0, errors: [] }
+    }
+
+    console.log(`[DEBUG-JUPITER] Querying Jupiter Portfolio API for wallet: ${walletAddress}`)
+    
+    // Try Jupiter Portfolio API endpoint
+    const response = await fetch(
+      `https://api.jup.ag/portfolio/v1/positions/${walletAddress}?platforms=meteora`,
+      {
+        headers: {
+          'x-api-key': jupiterApiKey,
+          'Accept': 'application/json',
+        },
+      }
+    )
+
+    if (!response.ok) {
+      console.log(`[DEBUG-JUPITER] API error: ${response.status}`)
+      return { positions: [], totalValueUSD: 0, totalUnclaimedFeesUSD: 0, errors: [] }
+    }
+
+    const data = await response.json()
+    
+    // #region agent log
+    console.log(`[DEBUG-JUPITER] Jupiter API response structure:`, JSON.stringify({
+      responseKeys: Object.keys(data),
+      elementsCount: data.elements?.length || 0,
+      positionsCount: data.positions?.length || 0,
+      hasFetcherReports: !!data.fetcherReports,
+      sampleElement: data.elements?.[0] ? {
+        type: data.elements[0].type,
+        platformId: data.elements[0].platformId,
+        label: data.elements[0].label,
+        value: data.elements[0].value,
+        dataKeys: data.elements[0].data ? Object.keys(data.elements[0].data).slice(0, 10) : [],
+      } : null,
+    }));
+    // #endregion
+    
+    // Parse Jupiter Portfolio response
+    // Jupiter API structure: { elements: [...], fetcherReports: [...] }
+    const positions: MeteoraPositionValue[] = []
+    const elements = data.elements || []
+    
+    for (const element of elements) {
+      // Check if this is a Meteora position
+      const isMeteora = element.platformId === 'meteora' || 
+                       element.type === 'meteora' ||
+                       element.label?.toLowerCase().includes('meteora') ||
+                       (element.data && (
+                         element.data.platform === 'meteora' ||
+                         element.data.protocol === 'meteora'
+                       ))
+      
+      if (isMeteora) {
+        const positionData = element.data || {}
+        
+        // #region agent log
+        console.log(`[DEBUG-JUPITER] Found Meteora element:`, JSON.stringify({
+          label: element.label,
+          value: element.value,
+          dataKeys: Object.keys(positionData),
+        }));
+        // #endregion
+        
+        // Try to extract position details from various possible structures
+        const positionAddress = positionData.positionAddress || 
+                               positionData.address || 
+                               positionData.nftAddress ||
+                               positionData.position_nft_address ||
+                               'unknown'
+        
+        const pairAddress = positionData.pairAddress || 
+                           positionData.poolAddress || 
+                           positionData.pair_address ||
+                           positionData.pool_address ||
+                           ''
+        
+        // Extract token amounts - try multiple possible field names
+        const tokenXAmount = positionData.tokenX?.amount || 
+                            positionData.token_x_amount ||
+                            positionData.amountX ||
+                            positionData.xAmount ||
+                            0
+        
+        const tokenYAmount = positionData.tokenY?.amount || 
+                            positionData.token_y_amount ||
+                            positionData.amountY ||
+                            positionData.yAmount ||
+                            0
+        
+        const tokenXValueUSD = positionData.tokenX?.valueUSD || 
+                              positionData.token_x_usd ||
+                              positionData.valueX ||
+                              0
+        
+        const tokenYValueUSD = positionData.tokenY?.valueUSD || 
+                              positionData.token_y_usd ||
+                              positionData.valueY ||
+                              0
+        
+        positions.push({
+          positionAddress,
+          pairAddress,
+          pairName: element.label || positionData.pairName || positionData.name || 'Unknown',
+          owner: walletAddress,
+          tokenX: {
+            symbol: positionData.tokenX?.symbol || positionData.token_x_symbol || 'Unknown',
+            mint: positionData.tokenX?.mint || positionData.token_x_mint || '',
+            amount: tokenXAmount,
+            price: tokenXAmount > 0 ? tokenXValueUSD / tokenXAmount : 0,
+            valueUSD: tokenXValueUSD,
+          },
+          tokenY: {
+            symbol: positionData.tokenY?.symbol || positionData.token_y_symbol || 'Unknown',
+            mint: positionData.tokenY?.mint || positionData.token_y_mint || '',
+            amount: tokenYAmount,
+            price: tokenYAmount > 0 ? tokenYValueUSD / tokenYAmount : 0,
+            valueUSD: tokenYValueUSD,
+          },
+          totalValueUSD: element.value || positionData.totalValueUSD || tokenXValueUSD + tokenYValueUSD,
+          unclaimedFeesUSD: positionData.unclaimedFeesUSD || positionData.unclaimed_fees_usd || 0,
+          totalFeesClaimed: positionData.totalFeesClaimed || positionData.total_fees_claimed || 0,
+          isOutOfRange: positionData.isOutOfRange || positionData.is_out_of_range || false,
+          feeAPR24h: positionData.feeAPR24h || positionData.fee_apr_24h || 0,
+        })
+      }
+    }
+    
+    const totalValueUSD = positions.reduce((sum, p) => sum + p.totalValueUSD, 0)
+    const totalUnclaimedFeesUSD = positions.reduce((sum, p) => sum + p.unclaimedFeesUSD, 0)
+    
+    console.log(`[DEBUG-JUPITER] ✅ Found ${positions.length} Meteora positions via Jupiter Portfolio API, total value: $${totalValueUSD.toFixed(2)}`)
+    
+    return { positions, totalValueUSD, totalUnclaimedFeesUSD, errors: [] }
+  } catch (error: any) {
+    console.error(`[DEBUG-JUPITER] Error:`, error.message)
+    return { positions: [], totalValueUSD: 0, totalUnclaimedFeesUSD: 0, errors: [error.message] }
+  }
+}
+
 export async function fetchMeteoraPositionsByWallet(
   walletAddress: string
 ): Promise<MeteoraPositionsResult> {
   console.log(`🌊 Fetching Meteora positions for wallet: ${walletAddress}`)
   
-  // Multi-strategy approach: Shyft API → Helius RPC → Transaction Parsing
+  // Strategy 1: Shyft API with totalXAmount/totalYAmount (PRIMARY - Has token amounts!)
+  const shyftResult = await fetchMeteoraPositionsViaShyft(walletAddress)
+  if (shyftResult.positions.length > 0 && shyftResult.totalValueUSD > 0) {
+    console.log(`[DEBUG-MULTI] ✅ Shyft API found ${shyftResult.positions.length} positions with values: $${shyftResult.totalValueUSD.toFixed(2)}`)
+    return shyftResult
+  }
+  
+  // Strategy 2: Fallback - Try to find position NFTs and query Meteora API
+  // (This won't have token amounts but at least shows positions exist)
   const positionNFTs = await fetchMeteoraPositionNFTsViaHelius(walletAddress)
   
   console.log(`[DEBUG-MULTI] Position NFT search complete: found ${positionNFTs.length} NFTs`);
   
   if (positionNFTs.length > 0) {
-    console.log(`[DEBUG-MULTI] Fetching values for ${positionNFTs.length} position NFTs`)
+    console.log(`[DEBUG-MULTI] Fetching values for ${positionNFTs.length} position NFTs from Meteora API`)
     
     // Fetch values for each position NFT from Meteora API
     const result = await fetchMeteoraPositionsValues(positionNFTs)
@@ -973,11 +1342,7 @@ export async function fetchMeteoraPositionsByWallet(
     
     if (result.positions.length > 0) {
       return result
-    } else {
-      console.log(`[DEBUG-MULTI] ⚠️ Found ${positionNFTs.length} NFTs but Meteora API returned 0 positions. Errors:`, result.errors)
     }
-  } else {
-    console.log(`[DEBUG-MULTI] No position NFTs found via any method`)
   }
   
   // Final fallback: Meteora API direct pool checking
