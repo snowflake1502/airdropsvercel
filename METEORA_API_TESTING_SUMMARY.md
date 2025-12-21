@@ -1,5 +1,7 @@
 # Meteora Position Detection - API Testing Summary
 
+> **📋 Quick Reference**: See [API_TESTING_REGISTRY.md](./API_TESTING_REGISTRY.md) for a concise checklist of tested APIs before starting new tests.
+
 ## ✅ APIs That WORK (Find Positions)
 
 ### 1. Shyft API (GraphQL) - ✅ WORKING

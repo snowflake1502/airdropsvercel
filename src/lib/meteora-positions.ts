@@ -628,8 +628,9 @@ async function fetchMeteoraPositionsDirect(
 }
 
 /**
- * Fetch Meteora positions with token amounts directly from Shyft API
- * Shyft API provides totalXAmount and totalYAmount fields - this is the solution!
+ * Fetch Meteora positions from Shyft API
+ * Shyft API provides position NFTs and liquidityShares, but NOT token amounts directly
+ * We need to calculate token amounts from liquidityShares + bin data
  */
 async function fetchMeteoraPositionsViaShyft(
   walletAddress: string
@@ -641,9 +642,9 @@ async function fetchMeteoraPositionsViaShyft(
       return { positions: [], totalValueUSD: 0, totalUnclaimedFeesUSD: 0, errors: [] }
     }
 
-    console.log(`[DEBUG-SHYFT] Querying Shyft API for Meteora positions with token amounts: ${walletAddress}`)
+    console.log(`[DEBUG-SHYFT] Querying Shyft API for Meteora positions: ${walletAddress}`)
     
-    // Query both Position and PositionV2 with token amounts (totalXAmount, totalYAmount)
+    // Query both Position and PositionV2 - only request fields that actually exist
     const query = `
       query GetMeteoraPositions {
         meteora_dlmm_Position(
@@ -654,10 +655,7 @@ async function fetchMeteoraPositionsViaShyft(
           lbPair
           lowerBinId
           upperBinId
-          totalXAmount
-          totalYAmount
-          totalClaimedFeeXAmount
-          totalClaimedFeeYAmount
+          liquidityShares
         }
         meteora_dlmm_PositionV2(
           where: {owner: {_eq: ${JSON.stringify(walletAddress)}}}
@@ -667,10 +665,7 @@ async function fetchMeteoraPositionsViaShyft(
           lbPair
           lowerBinId
           upperBinId
-          totalXAmount
-          totalYAmount
-          totalClaimedFeeXAmount
-          totalClaimedFeeYAmount
+          liquidityShares
         }
       }
     `
@@ -697,6 +692,7 @@ async function fetchMeteoraPositionsViaShyft(
     
     if (data.errors) {
       console.log(`[DEBUG-SHYFT] GraphQL errors:`, JSON.stringify(data.errors))
+      // If errors, return empty - will fall back to other methods
       return { positions: [], totalValueUSD: 0, totalUnclaimedFeesUSD: 0, errors: [] }
     }
 
@@ -711,105 +707,26 @@ async function fetchMeteoraPositionsViaShyft(
       return { positions: [], totalValueUSD: 0, totalUnclaimedFeesUSD: 0, errors: [] }
     }
     
-    // Process each position - get pair data for token info and prices
+    // Shyft API only provides position NFTs and liquidityShares, NOT token amounts directly
+    // We need to fetch position values using the existing fetchMeteoraPositionValue function
+    // which will try multiple methods to get token amounts
     const positions: MeteoraPositionValue[] = []
     const errors: string[] = []
     
     for (const pos of allPositions) {
       try {
         const positionAddress = pos.pubkey
-        const pairAddress = pos.lbPair
         
-        // Get pair data for token info
-        const pairResponse = await fetch(
-          `https://dlmm-api.meteora.ag/pair/${pairAddress}`,
-          { headers: { Accept: 'application/json' } }
-        )
+        // Use existing function to fetch position value (tries multiple methods)
+        const positionValue = await fetchMeteoraPositionValue(positionAddress, walletAddress)
         
-        if (!pairResponse.ok) {
-          errors.push(`Pair ${pairAddress}: ${pairResponse.status}`)
-          continue
+        if (positionValue && positionValue.totalValueUSD > 0) {
+          positions.push(positionValue)
+          console.log(`[DEBUG-SHYFT] ✅ Position ${positionAddress.slice(0, 8)}...: $${positionValue.totalValueUSD.toFixed(2)}`)
+        } else {
+          console.log(`[DEBUG-SHYFT] ⚠️ Position ${positionAddress.slice(0, 8)}...: Could not get token amounts (value: $0.00)`)
+          errors.push(`Position ${positionAddress}: Could not fetch token amounts`)
         }
-        
-        const pairData = await pairResponse.json()
-        const tokenXDecimals = pairData.mint_x_decimals || 9
-        const tokenYDecimals = pairData.mint_y_decimals || 6
-        const currentPrice = Number(pairData.current_price || 125) // SOL price
-        
-        // Get token amounts from Shyft (already in raw amounts, need to divide by decimals)
-        const tokenXAmountRaw = Number(pos.totalXAmount || 0)
-        const tokenYAmountRaw = Number(pos.totalYAmount || 0)
-        const tokenXAmount = tokenXAmountRaw / Math.pow(10, tokenXDecimals)
-        const tokenYAmount = tokenYAmountRaw / Math.pow(10, tokenYDecimals)
-        
-        // Get unclaimed fees (if available)
-        const unclaimedFeeXRaw = Number(pos.totalClaimedFeeXAmount || 0)
-        const unclaimedFeeYRaw = Number(pos.totalClaimedFeeYAmount || 0)
-        const unclaimedFeeX = unclaimedFeeXRaw / Math.pow(10, tokenXDecimals)
-        const unclaimedFeeY = unclaimedFeeYRaw / Math.pow(10, tokenYDecimals)
-        
-        // Determine prices
-        let tokenXPrice = 1
-        let tokenYPrice = 1
-        
-        if (pairData.mint_x === SOL_MINT) {
-          tokenXPrice = currentPrice
-          tokenYPrice = 1 // USDC
-        } else if (pairData.mint_y === SOL_MINT) {
-          tokenYPrice = currentPrice
-          tokenXPrice = 1 // USDC
-        } else if (pairData.mint_x === USDC_MINT) {
-          tokenXPrice = 1
-          tokenYPrice = currentPrice
-        } else if (pairData.mint_y === USDC_MINT) {
-          tokenYPrice = 1
-          tokenXPrice = currentPrice
-        }
-        
-        const tokenXValueUSD = tokenXAmount * tokenXPrice
-        const tokenYValueUSD = tokenYAmount * tokenYPrice
-        const totalValueUSD = tokenXValueUSD + tokenYValueUSD
-        const unclaimedFeesUSD = (unclaimedFeeX * tokenXPrice) + (unclaimedFeeY * tokenYPrice)
-        
-        // Check if out of range
-        const activeBinId = pairData.active_bin_id
-        const isOutOfRange = pos.lowerBinId !== undefined && 
-                            pos.upperBinId !== undefined && 
-                            activeBinId !== undefined &&
-                            (activeBinId < pos.lowerBinId || activeBinId > pos.upperBinId)
-        
-        console.log(`[DEBUG-SHYFT] Position ${positionAddress.slice(0, 8)}...:`, JSON.stringify({
-          tokenXAmount,
-          tokenYAmount,
-          totalValueUSD,
-          isOutOfRange,
-        }))
-        
-        positions.push({
-          positionAddress,
-          pairAddress,
-          pairName: pairData.name || 'Unknown',
-          owner: walletAddress,
-          tokenX: {
-            symbol: pairData.name?.split('-')[0] || 'Unknown',
-            mint: pairData.mint_x,
-            amount: tokenXAmount,
-            price: tokenXPrice,
-            valueUSD: tokenXValueUSD,
-          },
-          tokenY: {
-            symbol: pairData.name?.split('-')[1] || 'Unknown',
-            mint: pairData.mint_y,
-            amount: tokenYAmount,
-            price: tokenYPrice,
-            valueUSD: tokenYValueUSD,
-          },
-          totalValueUSD,
-          unclaimedFeesUSD,
-          totalFeesClaimed: 0, // Shyft provides claimed fees, not total
-          isOutOfRange: isOutOfRange || false,
-          feeAPR24h: 0, // Would need to get from Meteora API
-        })
       } catch (error: any) {
         errors.push(`Position ${pos.pubkey}: ${error.message}`)
       }
@@ -843,7 +760,8 @@ async function fetchMeteoraPositionNFTsViaShyft(
 
     console.log(`[DEBUG-SHYFT] Querying Shyft API for Meteora positions: ${walletAddress}`)
     
-    // Query both Position and PositionV2 with token amounts (totalXAmount, totalYAmount)
+    // Query both Position and PositionV2 - only request fields that actually exist
+    // Note: Shyft does NOT provide totalXAmount/totalYAmount - we need to calculate from liquidityShares + bin data
     const query = `
       query GetMeteoraPositions {
         meteora_dlmm_Position(
@@ -854,10 +772,7 @@ async function fetchMeteoraPositionNFTsViaShyft(
           lbPair
           lowerBinId
           upperBinId
-          totalXAmount
-          totalYAmount
-          totalClaimedFeeXAmount
-          totalClaimedFeeYAmount
+          liquidityShares
         }
         meteora_dlmm_PositionV2(
           where: {owner: {_eq: ${JSON.stringify(walletAddress)}}}
@@ -867,10 +782,7 @@ async function fetchMeteoraPositionNFTsViaShyft(
           lbPair
           lowerBinId
           upperBinId
-          totalXAmount
-          totalYAmount
-          totalClaimedFeeXAmount
-          totalClaimedFeeYAmount
+          liquidityShares
         }
       }
     `
@@ -912,15 +824,13 @@ async function fetchMeteoraPositionNFTsViaShyft(
     
     if (positionAddresses.length > 0) {
       console.log(`[DEBUG-SHYFT] Position addresses:`, positionAddresses.map((addr: string) => addr.slice(0, 8) + '...'))
-      // Log position details including token amounts from Shyft
+      // Log position details from Shyft
       allPositions.forEach((p: any) => {
         console.log(`[DEBUG-SHYFT] Position ${p.pubkey.slice(0, 8)}...:`, JSON.stringify({
           lbPair: p.lbPair?.slice(0, 8),
           lowerBinId: p.lowerBinId,
           upperBinId: p.upperBinId,
-          totalXAmount: p.totalXAmount,
-          totalYAmount: p.totalYAmount,
-          hasTokenAmounts: !!(p.totalXAmount || p.totalYAmount),
+          liquiditySharesCount: p.liquidityShares?.length || 0,
         }))
       })
     }
