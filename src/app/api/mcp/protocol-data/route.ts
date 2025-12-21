@@ -88,11 +88,30 @@ async function fallbackProtocolData(protocol: string, walletAddress: string) {
 
       const tx = await connection.getParsedTransaction(s.signature, { maxSupportedTransactionVersion: 0 })
       if (!tx) continue
-      const programIds =
+
+      // Jupiter is frequently invoked via inner instructions. To avoid false negatives,
+      // collect program IDs from:
+      // - top-level instructions
+      // - inner instructions
+      // - account keys (sometimes the program shows up only there in parsed formats)
+      const topLevelProgramIds =
         (tx.transaction.message.instructions as any[])
           .map((ix) => ix?.programId?.toBase58?.() || ix?.programId?.toString?.())
           .filter(Boolean) as string[]
-      const isJup = programIds.some((p) => JUPITER_PROGRAMS.has(p))
+
+      const innerProgramIds =
+        (tx.meta?.innerInstructions || [])
+          .flatMap((inner: any) => (inner?.instructions || []).map((ix: any) => ix?.programId?.toBase58?.() || ix?.programId?.toString?.()))
+          .filter(Boolean) as string[]
+
+      const accountKeys =
+        (tx.transaction.message.accountKeys as any[] | undefined)?.map((k: any) => k?.pubkey?.toBase58?.() || k?.pubkey?.toString?.() || (typeof k === 'string' ? k : undefined)).filter(Boolean) as string[]
+
+      const allProgramIds = Array.from(new Set([...topLevelProgramIds, ...innerProgramIds, ...accountKeys]))
+
+      const isJup =
+        allProgramIds.some((p) => JUPITER_PROGRAMS.has(p)) ||
+        allProgramIds.some((p) => typeof p === 'string' && p.startsWith('JUP'))
       if (!isJup) continue
 
       if (!lastTx) {
