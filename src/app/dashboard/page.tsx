@@ -208,16 +208,43 @@ export default function HomePage() {
       const closes = transactions?.filter(tx => tx.tx_type === 'position_close') || []
       const fees = transactions?.filter(tx => tx.tx_type === 'fee_claim') || []
 
-      const totalInvested = opens.reduce((sum, tx) => sum + Math.abs(parseFloat(tx.total_usd) || 0), 0)
-      const totalWithdrawn = closes.reduce((sum, tx) => sum + Math.abs(parseFloat(tx.total_usd) || 0), 0)
-      const totalFees = fees.reduce((sum, tx) => sum + Math.abs(parseFloat(tx.total_usd) || 0), 0)
+      // NOTE:
+      // - `total_usd` stored for Meteora txs can be inaccurate (older parser used a fixed SOL price).
+      // - Prefer recomputing USD from token amounts + current SOL price to avoid portfolio mismatches
+      //   against Phantom/Jupiter holdings when positions are closed.
+      const SOL_MINT = 'So11111111111111111111111111111111111111112'
+      const getTxUsd = (tx: any): number => {
+        const abs = (n: number) => Math.abs(Number.isFinite(n) ? n : 0)
+        let usd = 0
+
+        const xMint = tx.token_x_mint as string | null | undefined
+        const yMint = tx.token_y_mint as string | null | undefined
+        const xAmt = abs(parseFloat(tx.token_x_amount) || 0)
+        const yAmt = abs(parseFloat(tx.token_y_amount) || 0)
+
+        if (xMint === SOL_MINT) usd += xAmt * solPriceUSD
+        else if (xMint === USDC_MINT) usd += xAmt
+
+        if (yMint === SOL_MINT) usd += yAmt * solPriceUSD
+        else if (yMint === USDC_MINT) usd += yAmt
+
+        // If we couldn't infer from mints, fall back to stored total_usd
+        if (usd <= 0) {
+          usd = abs(parseFloat(tx.total_usd) || 0)
+        }
+        return usd
+      }
+
+      const totalInvested = opens.reduce((sum, tx) => sum + getTxUsd(tx), 0)
+      const totalWithdrawn = closes.reduce((sum, tx) => sum + getTxUsd(tx), 0)
+      const totalFees = fees.reduce((sum, tx) => sum + getTxUsd(tx), 0)
 
       // Match opens to closes by position_nft_address
       // Build a map of how many times each NFT address was opened/closed
       const nftOpenCounts = new Map<string, number>()
       const nftCloseCounts = new Map<string, number>()
       
-      // Track opens without NFT addresses separately (these are likely active)
+      // Track opens without NFT addresses separately (unknown; do NOT assume active)
       let opensWithoutNft = 0
       
       opens.forEach(tx => {
@@ -235,7 +262,9 @@ export default function HomePage() {
       })
       
       // Calculate active positions: for each NFT, opens - closes
-      let activePositionCount = opensWithoutNft // All opens without NFT are considered active
+      // IMPORTANT: Do NOT treat opens without NFT as active, otherwise we will over-count
+      // and inflate portfolio value after positions are closed.
+      let activePositionCount = 0
       
       nftOpenCounts.forEach((openCount, nftAddr) => {
         const closeCount = nftCloseCounts.get(nftAddr) || 0
@@ -302,8 +331,9 @@ export default function HomePage() {
           }
       } catch (meteoraError) {
         console.warn('Could not fetch real-time Meteora values, falling back to estimate:', meteoraError)
-        // Fallback to historical estimate if API fails (only if we have database positions)
-        if (activePositionCount > 0) {
+        // Fallback to a *conservative* estimate ONLY for positions we can match by NFT.
+        // If we can't match opens/closes by NFT (opensWithoutNft > 0), skip to avoid false positives.
+        if (activePositionCount > 0 && opensWithoutNft === 0) {
           nftOpenCounts.forEach((openCount, nft) => {
             const closeCount = nftCloseCounts.get(nft) || 0
             const netPositions = openCount - closeCount
@@ -311,10 +341,10 @@ export default function HomePage() {
             if (netPositions > 0) {
               const deposits = opens
                 .filter(tx => tx.position_nft_address === nft)
-                .reduce((sum, tx) => sum + Math.abs(parseFloat(tx.total_usd) || 0), 0)
+                .reduce((sum, tx) => sum + getTxUsd(tx), 0)
               const withdrawals = closes
                 .filter(tx => tx.position_nft_address === nft)
-                .reduce((sum, tx) => sum + Math.abs(parseFloat(tx.total_usd) || 0), 0)
+                .reduce((sum, tx) => sum + getTxUsd(tx), 0)
               meteoraLPValueUSD += Math.max(0, deposits - withdrawals)
             }
           })
@@ -353,7 +383,13 @@ export default function HomePage() {
       })
 
       // Total value includes: SOL + USDC + LST + Meteora LP positions
-      const totalValueUSD = (solBalance * solPriceUSD) + usdcBalance + (lstSolEquivalent * solPriceUSD) + meteoraLPValueUSD
+      // Only include Meteora LP value if we have a reliable signal that positions are active.
+      const safeMeteoraLPValueUSD = activePositionCount > 0 ? meteoraLPValueUSD : 0
+      const totalValueUSD =
+        (solBalance * solPriceUSD) +
+        usdcBalance +
+        (lstSolEquivalent * solPriceUSD) +
+        safeMeteoraLPValueUSD
       
       // Calculate positions by protocol
       const meteoraPositions = activePositionCount
@@ -369,7 +405,7 @@ export default function HomePage() {
         lstBalance,
         lstSolEquivalent,
         lstSymbol,
-        meteoraLPValueUSD,
+        meteoraLPValueUSD: safeMeteoraLPValueUSD,
         activePositions: totalPositions,
         totalPnL: pnlInUSD,
         totalPnLSOL: pnlInSOL,
@@ -504,6 +540,11 @@ export default function HomePage() {
                 <p className="text-slate-500 text-sm mt-1">
                   ≈ {(stats.totalValueUSD / solPriceUSD).toFixed(4)} SOL @ ${solPriceUSD.toFixed(2)}
                 </p>
+                {stats.meteoraLPValueUSD > 0 && (
+                  <p className="text-slate-500 text-xs mt-1">
+                    Includes ${stats.meteoraLPValueUSD.toFixed(2)} in DeFi positions (not shown in wallet)
+                  </p>
+                )}
                 <div className="flex items-center gap-3 mt-3 flex-wrap">
                   <div className="flex items-center gap-2 bg-slate-800/50 rounded-lg px-3 py-1.5">
                     <span className="text-lg">🟡</span>
