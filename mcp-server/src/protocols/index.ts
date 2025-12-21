@@ -6,8 +6,8 @@
 import { Connection } from '@solana/web3.js'
 import { BaseProtocol } from './base-protocol'
 import { MeteoraProtocol } from './meteora'
-// import { JupiterProtocol } from './jupiter'
-// import { SanctumProtocol } from './sanctum'
+import { JupiterProtocol } from './jupiter'
+import { SanctumProtocol } from './sanctum'
 
 export class ProtocolRegistry {
   private protocols: Map<string, BaseProtocol>
@@ -19,8 +19,8 @@ export class ProtocolRegistry {
 
     // Register protocols
     this.registerProtocol('meteora', new MeteoraProtocol(this.connection))
-    // this.registerProtocol('jupiter', new JupiterProtocol(this.connection))
-    // this.registerProtocol('sanctum', new SanctumProtocol(this.connection))
+    this.registerProtocol('jupiter', new JupiterProtocol(this.connection))
+    this.registerProtocol('sanctum', new SanctumProtocol(this.connection))
   }
 
   /**

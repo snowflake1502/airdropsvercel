@@ -45,6 +45,26 @@ export class CryptoProtocolMCPServer {
       return {
         tools: [
           {
+            name: 'get_protocol_data',
+            description:
+              'Get protocol-level data (holdings/activity) for a wallet. This is the preferred read API for the dashboard.',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                protocol: {
+                  type: 'string',
+                  enum: ['meteora', 'jupiter', 'sanctum'],
+                  description: 'Protocol name',
+                },
+                walletAddress: {
+                  type: 'string',
+                  description: 'Wallet address',
+                },
+              },
+              required: ['protocol', 'walletAddress'],
+            },
+          },
+          {
             name: 'claim_fees',
             description: 'Build transaction to claim unclaimed fees from a liquidity position',
             inputSchema: {
@@ -158,7 +178,10 @@ export class CryptoProtocolMCPServer {
 
     // Handle tool calls
     this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
-      const { name, arguments: args } = request.params
+      const { name } = request.params
+      // MCP can omit arguments; keep runtime-safe default
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const args: any = request.params.arguments ?? {}
 
       try {
         switch (name) {
@@ -292,6 +315,54 @@ export class CryptoProtocolMCPServer {
                 {
                   type: 'text',
                   text: JSON.stringify(positions, null, 2),
+                },
+              ],
+            }
+          }
+
+          case 'get_protocol_data': {
+            const protocolName = (args as any).protocol as string
+            const protocol = this.protocolRegistry.getProtocol(protocolName)
+            if (!protocol) {
+              return {
+                content: [
+                  {
+                    type: 'text',
+                    text: `Protocol ${protocolName} not found. Available: ${this.protocolRegistry.getProtocolNames().join(', ')}`,
+                  },
+                ],
+                isError: true,
+              }
+            }
+
+            // Protocol-level data is optional; return structured "not supported" if missing.
+            const maybeProvider = protocol as any
+            if (typeof maybeProvider.getProtocolData !== 'function') {
+              return {
+                content: [
+                  {
+                    type: 'text',
+                    text: JSON.stringify(
+                      {
+                        protocol: protocolName,
+                        walletAddress: (args as any).walletAddress,
+                        supported: false,
+                        error: 'Protocol does not implement getProtocolData()',
+                      },
+                      null,
+                      2
+                    ),
+                  },
+                ],
+              }
+            }
+
+            const data = await maybeProvider.getProtocolData((args as any).walletAddress)
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(data, null, 2),
                 },
               ],
             }

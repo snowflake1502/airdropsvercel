@@ -37,6 +37,11 @@ export interface GetPositionsParams {
   walletAddress: string
 }
 
+export interface GetProtocolDataParams {
+  protocol: 'meteora' | 'jupiter' | 'sanctum'
+  walletAddress: string
+}
+
 export interface TransactionResult {
   success: boolean
   signature?: string
@@ -202,6 +207,26 @@ export class MCPClient {
     }
 
     return JSON.parse(result.content[0]?.text || '[]')
+  }
+
+  /**
+   * Get protocol-level data (holdings/activity) for a wallet
+   */
+  async getProtocolData(params: GetProtocolDataParams): Promise<any> {
+    if (!this.client || !this.connected) {
+      throw new Error('MCP client not connected')
+    }
+
+    const result = await this.client.callTool({
+      name: 'get_protocol_data',
+      arguments: params,
+    })
+
+    if (result.isError) {
+      throw new Error(result.content[0]?.text || 'Unknown error')
+    }
+
+    return JSON.parse(result.content[0]?.text || '{}')
   }
 }
 

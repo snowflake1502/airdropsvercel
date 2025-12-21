@@ -8,6 +8,14 @@ import { BaseProtocol } from './base-protocol'
 import { Position, TransactionResult, ClaimFeesParams, RebalanceParams, OpenPositionParams } from '../types'
 // import DLMM from '@meteora-ag/dlmm' // Uncomment when SDK is installed
 
+// NOTE:
+// The Meteora SDK is optional. We keep a placeholder symbol so TypeScript builds succeed
+// even if we haven't wired the SDK methods yet.
+// When we implement this fully, replace with:
+//   import DLMM from '@meteora-ag/dlmm'
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const DLMM: any = null
+
 export class MeteoraProtocol extends BaseProtocol {
   constructor(connection: Connection) {
     super(connection, 'meteora')
