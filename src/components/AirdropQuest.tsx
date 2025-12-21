@@ -397,12 +397,40 @@ export default function AirdropQuest({ userId, walletAddress, transactions }: Ai
       
       if (walletAddress) {
         try {
-          const [jupResult, sanctumResult] = await Promise.all([
-            quickCheckJupiterSwaps(walletAddress),
-            checkSanctumLST(walletAddress)
+          // Prefer the unified protocol-data API (MCP-backed locally, RPC fallback on Vercel).
+          // This makes it obvious which source is being used.
+          const [jupPd, sanctumPd] = await Promise.all([
+            fetch(`/api/mcp/protocol-data?protocol=jupiter&walletAddress=${walletAddress}`).then(r => r.json()),
+            fetch(`/api/mcp/protocol-data?protocol=sanctum&walletAddress=${walletAddress}`).then(r => r.json()),
           ])
-          jupiterStatus = jupResult
-          hasSanctumLST = sanctumResult
+
+          console.log('🧩 Protocol data (jupiter):', jupPd?.source)
+          console.log('🧩 Protocol data (sanctum):', sanctumPd?.source)
+
+          // Jupiter: infer swap-today from lastTxBlockTime when present; otherwise fall back to old detector.
+          const lastTxBlockTime = jupPd?.data?.recentSwaps?.lastTxBlockTime as number | null | undefined
+          if (lastTxBlockTime) {
+            const todayStart = new Date()
+            todayStart.setHours(0, 0, 0, 0)
+            const todayTs = Math.floor(todayStart.getTime() / 1000)
+            jupiterStatus = {
+              hasSwapToday: lastTxBlockTime >= todayTs,
+              hasLimitOrderToday: false,
+              hasPerpsToday: false,
+            }
+          } else {
+            // Fallback to legacy detector (keeps behavior if API unavailable)
+            jupiterStatus = await quickCheckJupiterSwaps(walletAddress)
+          }
+
+          // Sanctum: holding exists if there is at least one LST in holdings.
+          const holdings = (sanctumPd?.data?.holdings || []) as any[]
+          hasSanctumLST = Array.isArray(holdings) ? holdings.length > 0 : false
+          if (!hasSanctumLST) {
+            // Fallback to legacy detector
+            hasSanctumLST = await checkSanctumLST(walletAddress)
+          }
+
           console.log('🪐 Jupiter activity:', jupiterStatus)
           console.log('⭐ Sanctum LST:', hasSanctumLST)
         } catch (err) {

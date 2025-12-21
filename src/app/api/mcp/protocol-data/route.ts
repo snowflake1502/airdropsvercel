@@ -78,6 +78,7 @@ async function fallbackProtocolData(protocol: string, walletAddress: string) {
     let last7d = 0
     let last30d = 0
     let lastTx: string | undefined
+    let lastTxBlockTime: number | null = null
 
     const candidates = sigs.slice(0, 30)
     for (const s of candidates) {
@@ -94,7 +95,10 @@ async function fallbackProtocolData(protocol: string, walletAddress: string) {
       const isJup = programIds.some((p) => JUPITER_PROGRAMS.has(p))
       if (!isJup) continue
 
-      if (!lastTx) lastTx = s.signature
+      if (!lastTx) {
+        lastTx = s.signature
+        lastTxBlockTime = s.blockTime
+      }
       if (ageSec <= sec7d) last7d += 1
       if (ageSec <= sec30d) last30d += 1
     }
@@ -103,7 +107,7 @@ async function fallbackProtocolData(protocol: string, walletAddress: string) {
       protocol: 'jupiter',
       walletAddress,
       jupBalance,
-      recentSwaps: { last7d, last30d, lastTx },
+      recentSwaps: { last7d, last30d, lastTx, lastTxBlockTime },
       lastUpdated: new Date().toISOString(),
       supported: true,
     }
