@@ -161,6 +161,16 @@ export async function fetchMeteoraPositionValue(
     }
 
     const positionData = await positionResponse.json()
+    
+    // #region agent log
+    console.log('[DEBUG-B] Position API response:', JSON.stringify({
+      positionAddress,
+      pairAddress: positionData.pair_address,
+      owner: positionData.owner,
+      hasPositionData: !!positionData,
+      positionDataKeys: positionData ? Object.keys(positionData).slice(0, 20) : [],
+    }));
+    // #endregion
 
     // Step 2: Get pair/pool data for token info
     const pairResponse = await fetch(
@@ -177,51 +187,104 @@ export async function fetchMeteoraPositionValue(
     }
 
     const pairData = await pairResponse.json()
+    
+    // #region agent log
+    console.log('[DEBUG-B2] Pair API response:', JSON.stringify({
+      pairAddress: positionData.pair_address,
+      name: pairData.name,
+      mint_x: pairData.mint_x,
+      mint_y: pairData.mint_y,
+      mint_x_decimals: pairData.mint_x_decimals,
+      mint_y_decimals: pairData.mint_y_decimals,
+      current_price: pairData.current_price,
+    }));
+    // #endregion
 
-    // Step 3: Get user's position details with token amounts
-    const userPositionsResponse = await fetch(
-      `https://dlmm-api.meteora.ag/pair/${positionData.pair_address}/user/${positionData.owner}`,
-      {
-        headers: { Accept: 'application/json' },
-        next: { revalidate: 30 }, // Cache for 30 seconds (more real-time)
-      }
-    )
-
+    // Step 3: Try to get token amounts from position data directly first
+    // Meteora position API might have token amounts in the response
     let tokenXAmount = 0
     let tokenYAmount = 0
     let unclaimedFeeX = 0
     let unclaimedFeeY = 0
     let isOutOfRange = false
-
-    if (userPositionsResponse.ok) {
-      const userPosData = await userPositionsResponse.json()
+    
+    const tokenXDecimals = pairData.mint_x_decimals || 9
+    const tokenYDecimals = pairData.mint_y_decimals || 6
+    
+    // Try getting amounts from position data directly
+    if (positionData.total_x_amount !== undefined || positionData.total_y_amount !== undefined) {
+      tokenXAmount = Number(positionData.total_x_amount || 0) / Math.pow(10, tokenXDecimals)
+      tokenYAmount = Number(positionData.total_y_amount || 0) / Math.pow(10, tokenYDecimals)
+      unclaimedFeeX = Number(positionData.fee_x || 0) / Math.pow(10, tokenXDecimals)
+      unclaimedFeeY = Number(positionData.fee_y || 0) / Math.pow(10, tokenYDecimals)
       
-      // Find this specific position
-      const specificPosition = userPosData.user_positions?.find(
-        (p: any) => p.position_address === positionAddress || p.public_key === positionAddress
+      // #region agent log
+      console.log('[DEBUG-B3] Got amounts from position data:', JSON.stringify({
+        tokenXAmount,
+        tokenYAmount,
+        unclaimedFeeX,
+        unclaimedFeeY,
+      }));
+      // #endregion
+    } else {
+      // Fallback: Try user positions endpoint
+      const userPositionsResponse = await fetch(
+        `https://dlmm-api.meteora.ag/pair/${positionData.pair_address}/user/${positionData.owner}`,
+        {
+          headers: { Accept: 'application/json' },
+          next: { revalidate: 30 },
+        }
       )
 
-      if (specificPosition) {
-        const tokenXDecimals = pairData.mint_x_decimals || 9
-        const tokenYDecimals = pairData.mint_y_decimals || 6
+      if (userPositionsResponse.ok) {
+        const userPosData = await userPositionsResponse.json()
         
         // #region agent log
-        console.log('[DEBUG-B] Raw API amounts:', JSON.stringify({positionAddress,raw_total_x_amount:specificPosition.position_data?.total_x_amount,raw_total_y_amount:specificPosition.position_data?.total_y_amount,tokenXDecimals,tokenYDecimals,pairName:pairData.name,mint_x:pairData.mint_x,mint_y:pairData.mint_y}));
+        console.log('[DEBUG-B4] User positions response:', JSON.stringify({
+          userPositionsCount: userPosData.user_positions?.length || 0,
+          firstPositionKeys: userPosData.user_positions?.[0] ? Object.keys(userPosData.user_positions[0]) : [],
+        }));
         // #endregion
         
-        tokenXAmount = Number(specificPosition.position_data?.total_x_amount || 0) / Math.pow(10, tokenXDecimals)
-        tokenYAmount = Number(specificPosition.position_data?.total_y_amount || 0) / Math.pow(10, tokenYDecimals)
-        unclaimedFeeX = Number(specificPosition.position_data?.fee_x || 0) / Math.pow(10, tokenXDecimals)
-        unclaimedFeeY = Number(specificPosition.position_data?.fee_y || 0) / Math.pow(10, tokenYDecimals)
-        
-        // Check if position is out of range
-        const lowerBinId = specificPosition.position_data?.lower_bin_id
-        const upperBinId = specificPosition.position_data?.upper_bin_id
-        const activeBinId = pairData.active_bin_id
-        
-        if (lowerBinId !== undefined && upperBinId !== undefined && activeBinId !== undefined) {
-          isOutOfRange = activeBinId < lowerBinId || activeBinId > upperBinId
+        // Find this specific position
+        const specificPosition = userPosData.user_positions?.find(
+          (p: any) => p.position_address === positionAddress || p.public_key === positionAddress
+        )
+
+        if (specificPosition) {
+          // #region agent log
+          console.log('[DEBUG-B5] Found specific position:', JSON.stringify({
+            positionAddress,
+            hasPositionData: !!specificPosition.position_data,
+            positionDataKeys: specificPosition.position_data ? Object.keys(specificPosition.position_data) : [],
+            raw_total_x: specificPosition.position_data?.total_x_amount,
+            raw_total_y: specificPosition.position_data?.total_y_amount,
+          }));
+          // #endregion
+          
+          tokenXAmount = Number(specificPosition.position_data?.total_x_amount || 0) / Math.pow(10, tokenXDecimals)
+          tokenYAmount = Number(specificPosition.position_data?.total_y_amount || 0) / Math.pow(10, tokenYDecimals)
+          unclaimedFeeX = Number(specificPosition.position_data?.fee_x || 0) / Math.pow(10, tokenXDecimals)
+          unclaimedFeeY = Number(specificPosition.position_data?.fee_y || 0) / Math.pow(10, tokenYDecimals)
+          
+          // Check if position is out of range
+          const lowerBinId = specificPosition.position_data?.lower_bin_id
+          const upperBinId = specificPosition.position_data?.upper_bin_id
+          const activeBinId = pairData.active_bin_id
+          
+          if (lowerBinId !== undefined && upperBinId !== undefined && activeBinId !== undefined) {
+            isOutOfRange = activeBinId < lowerBinId || activeBinId > upperBinId
+          }
+        } else {
+          // #region agent log
+          console.log('[DEBUG-B6] Position not found in user_positions, trying all positions');
+          // #endregion
         }
+      } else {
+        // #region agent log
+        const errorText = await userPositionsResponse.text().catch(() => '')
+        console.log('[DEBUG-B7] User positions endpoint failed:', userPositionsResponse.status, errorText.slice(0, 200));
+        // #endregion
       }
     }
 
