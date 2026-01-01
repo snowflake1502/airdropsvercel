@@ -9,6 +9,7 @@ import {
   extractPositionNFTAddress,
   type ParsedTransaction,
 } from './meteora-transaction-parser'
+import { Connection, PublicKey } from '@solana/web3.js'
 
 export interface MeteoraPositionValue {
   positionAddress: string
@@ -46,6 +47,28 @@ export interface MeteoraPositionsResult {
 const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'
 const SOL_MINT = 'So11111111111111111111111111111111111111112'
 const METEORA_DLMM_PROGRAM = 'LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo'
+
+function toUiAmount(raw: string | null | undefined, decimals: number): number {
+  if (!raw) return 0
+  try {
+    let n = BigInt(raw)
+    const neg = n < 0n
+    if (neg) n = -n
+    const s = n.toString()
+    if (decimals <= 0) return Number(neg ? `-${s}` : s)
+    const padded = s.padStart(decimals + 1, '0')
+    const intPart = padded.slice(0, -decimals) || '0'
+    const fracPartRaw = padded.slice(-decimals)
+    const fracPart = fracPartRaw.replace(/0+$/, '')
+    const out = fracPart ? `${intPart}.${fracPart}` : intPart
+    const asNum = Number(out)
+    return neg ? -asNum : asNum
+  } catch {
+    // Fallback (may lose precision, but better than 0)
+    const asNum = Number(raw)
+    return Number.isFinite(asNum) ? asNum / Math.pow(10, decimals) : 0
+  }
+}
 
 /**
  * Get RPC URL (Helius if available, fallback to public)
@@ -338,6 +361,53 @@ export async function fetchMeteoraPositionValue(
         // Check if we can get amounts from Shyft API position data
         // Shyft might have more detailed position information
         console.log('[DEBUG-B8] User positions endpoint unavailable, position may be empty or we need Shyft detailed query')
+      }
+    }
+
+    // If we still couldn't get token amounts, do the on-chain calculation using the official SDK.
+    // This reads the position account + required bin arrays and derives totalX/totalY amounts.
+    if (tokenXAmount === 0 && tokenYAmount === 0) {
+      try {
+        const rpcUrl = getRpcUrl()
+        const connection = new Connection(rpcUrl, 'confirmed')
+        const { default: DLMM } = await import('@meteora-ag/dlmm')
+
+        const dlmm = await DLMM.create(connection, new PublicKey(positionData.pair_address))
+        const pos = await dlmm.getPosition(new PublicKey(positionAddress))
+        const pd: any = pos?.positionData
+
+        if (pd) {
+          const xRaw = pd.totalXAmountExcludeTransferFee?.toString?.() ?? pd.totalXAmount?.toString?.() ?? pd.totalXAmount ?? '0'
+          const yRaw = pd.totalYAmountExcludeTransferFee?.toString?.() ?? pd.totalYAmount?.toString?.() ?? pd.totalYAmount ?? '0'
+          const feeXRaw = pd.feeXExcludeTransferFee?.toString?.() ?? pd.feeX?.toString?.() ?? pd.feeX ?? '0'
+          const feeYRaw = pd.feeYExcludeTransferFee?.toString?.() ?? pd.feeY?.toString?.() ?? pd.feeY ?? '0'
+
+          tokenXAmount = toUiAmount(xRaw, tokenXDecimals)
+          tokenYAmount = toUiAmount(yRaw, tokenYDecimals)
+          unclaimedFeeX = toUiAmount(feeXRaw, tokenXDecimals)
+          unclaimedFeeY = toUiAmount(feeYRaw, tokenYDecimals)
+
+          const lowerBinId = typeof pd.lowerBinId === 'number' ? pd.lowerBinId : undefined
+          const upperBinId = typeof pd.upperBinId === 'number' ? pd.upperBinId : undefined
+          const activeBinId = (dlmm as any)?.lbPair?.activeId
+          if (
+            typeof lowerBinId === 'number' &&
+            typeof upperBinId === 'number' &&
+            typeof activeBinId === 'number'
+          ) {
+            isOutOfRange = activeBinId < lowerBinId || activeBinId > upperBinId
+          }
+
+          console.log('[DEBUG-B6] ✅ On-chain SDK amounts:', {
+            tokenXAmount,
+            tokenYAmount,
+            unclaimedFeeX,
+            unclaimedFeeY,
+            isOutOfRange,
+          })
+        }
+      } catch (e: any) {
+        console.log('[DEBUG-B6] On-chain SDK valuation failed:', e?.message || String(e))
       }
     }
     
