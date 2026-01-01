@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { useRouter, useSearchParams } from 'next/navigation'
+import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { User } from '@supabase/supabase-js'
 import DashboardLayout from '@/components/DashboardLayout'
@@ -54,7 +54,6 @@ export default function PortfolioPage() {
   const [pnlOverrideTarget, setPnlOverrideTarget] = useState<{ nft: string; pair?: string } | null>(null)
   const [pnlOverrides, setPnlOverrides] = useState<Record<string, { profitUSD: number; pnlPercent?: number }>>({})
   const router = useRouter()
-  const searchParams = useSearchParams()
   const { publicKey, connected } = useWallet()
   const { connection } = useConnection()
 
@@ -83,14 +82,14 @@ export default function PortfolioPage() {
 
   // Support deep-link from Home page: /dashboard/portfolio?addPosition=1
   useEffect(() => {
-    const flag = searchParams?.get('addPosition')
+    if (typeof window === 'undefined') return
+    const flag = new URLSearchParams(window.location.search).get('addPosition')
     if (flag === '1') {
       setShowManualMeteoraModal(true)
       // Clean URL (avoid reopening on refresh)
       router.replace('/dashboard/portfolio')
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams])
+  }, [router])
 
   const getTxUsd = (tx: any): number => {
     // Same fix as dashboard: avoid relying on historical total_usd derived from hardcoded SOL price.
