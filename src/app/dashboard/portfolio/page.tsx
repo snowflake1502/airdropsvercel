@@ -389,6 +389,32 @@ export default function PortfolioPage() {
     }
   }
 
+  const removeManualPosition = async (manualRowId: string) => {
+    if (!user) return
+    const ok = confirm('Remove this manual position? (You can add it again later.)')
+    if (!ok) return
+
+    try {
+      const { error } = await supabase
+        .from('manual_positions')
+        .update({ is_active: false })
+        .eq('id', manualRowId)
+        .eq('user_id', user.id)
+
+      if (error) throw error
+      await loadPositions()
+    } catch (e: any) {
+      console.error('Failed to remove manual position:', e)
+      alert(e?.message || 'Failed to remove manual position')
+    }
+  }
+
+  const shortAddr = (addr?: string) => {
+    if (!addr) return ''
+    if (addr.length <= 12) return addr
+    return `${addr.slice(0, 4)}…${addr.slice(-4)}`
+  }
+
   const filteredTransactions = transactions.filter(tx => {
     if (historyFilter === 'all') return true
     if (historyFilter === 'opens') return tx.tx_type === 'position_open'
@@ -640,6 +666,9 @@ export default function PortfolioPage() {
                             <p className="text-slate-400 text-sm">
                               Meteora DLMM {position.source === 'manual' ? '(Manual)' : ''}
                             </p>
+                            <p className="text-slate-500 text-xs mt-0.5">
+                              Position: <span className="font-mono">{shortAddr(position.position_address)}</span>
+                            </p>
                           </div>
                         </div>
                         <div className="flex items-center gap-2">
@@ -650,7 +679,11 @@ export default function PortfolioPage() {
                           }`}>
                             {position.is_in_range ? '● In Range' : '○ Out of Range'}
                           </span>
-                          {position.source === 'manual' && (
+                          {position.source !== 'manual' ? (
+                            <span className="px-3 py-1 rounded-full text-xs font-semibold bg-cyan-500/15 text-cyan-300 border border-cyan-500/25">
+                              Auto
+                            </span>
+                          ) : (
                             <span className="px-3 py-1 rounded-full text-xs font-semibold bg-violet-500/20 text-violet-300 border border-violet-500/30">
                               Manual
                             </span>
@@ -689,6 +722,14 @@ export default function PortfolioPage() {
                         >
                           View on Meteora ↗
                         </a>
+                        {position.source === 'manual' && (
+                          <button
+                            onClick={() => removeManualPosition(position.id)}
+                            className="ml-auto px-4 py-2 bg-red-500/10 hover:bg-red-500/20 text-red-300 rounded-xl text-sm font-medium transition-colors border border-red-500/20"
+                          >
+                            Remove Manual
+                          </button>
+                        )}
                       </div>
                     </div>
                   ))
