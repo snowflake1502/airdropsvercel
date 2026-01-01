@@ -37,6 +37,20 @@ interface Position {
   source?: 'auto' | 'manual'
 }
 
+type MeteoraPositionsValueResponse = {
+  success?: boolean
+  totalValueUSD?: number
+  totalUnclaimedFeesUSD?: number
+  positions?: Array<{
+    positionAddress: string
+    pairName: string
+    totalValueUSD: number
+    unclaimedFeesUSD: number
+    feeAPR24h: number
+    isOutOfRange: boolean
+  }>
+}
+
 export default function PortfolioPage() {
   const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
@@ -233,6 +247,44 @@ export default function PortfolioPage() {
         }
       })
 
+      // Replace auto position values with real-time Meteora valuation (if available)
+      try {
+        const { data: { session } } = await supabase.auth.getSession()
+        const auth = session?.access_token ? `Bearer ${session.access_token}` : undefined
+
+        const qs = new URLSearchParams({
+          walletAddress: publicKey.toBase58(),
+          userId: user.id,
+        })
+
+        const resp = await fetch(`/api/meteora/positions-value?${qs.toString()}`, {
+          headers: auth ? { Authorization: auth } : undefined,
+        })
+
+        if (resp.ok) {
+          const json = (await resp.json()) as MeteoraPositionsValueResponse
+          const byAddr = new Map<string, (MeteoraPositionsValueResponse['positions'][number])>()
+          for (const p of json.positions || []) {
+            byAddr.set(p.positionAddress, p)
+          }
+
+          for (const p of activePositions) {
+            const rt = byAddr.get(p.position_address)
+            if (!rt) continue
+            p.value_usd = Number(rt.totalValueUSD || 0)
+            p.unclaimed_fees = Number(rt.unclaimedFeesUSD || 0)
+            p.apr_24h = Number(rt.feeAPR24h || 0)
+            p.is_in_range = !rt.isOutOfRange
+            // Keep pool_name from tx, but if missing/placeholder, use real-time pairName
+            if (!p.pool_name || p.pool_name.includes('Unknown')) {
+              p.pool_name = rt.pairName || p.pool_name
+            }
+          }
+        }
+      } catch (e) {
+        // Non-fatal: we can still show tx-derived positions
+      }
+
       // Add manual positions (user-provided) as additional active positions
       const { data: manual } = await supabase
         .from('manual_positions')
@@ -260,14 +312,18 @@ export default function PortfolioPage() {
           }
         }) || []
 
+      // If a manual entry matches an auto-detected position address, hide the manual duplicate.
+      const autoAddrs = new Set(activePositions.map((p) => p.position_address))
+      const dedupedManual = manualPositions.filter((p) => !autoAddrs.has(p.position_address))
+
       console.log('📊 Portfolio positions:', {
         totalOpens: opens.length,
         totalCloses: closes.length,
         activePositions: activePositions.length,
-        manualPositions: manualPositions.length,
+        manualPositions: dedupedManual.length,
       })
 
-      setPositions([...activePositions, ...manualPositions])
+      setPositions([...activePositions, ...dedupedManual])
     } catch (error) {
       console.error('Error loading positions:', error)
     }
