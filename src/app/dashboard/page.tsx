@@ -484,6 +484,12 @@ export default function HomePage() {
           </div>
           {connected && (
             <div className="flex items-center gap-2">
+              <Link
+                href="/dashboard/portfolio?addPosition=1"
+                className="px-4 py-2 bg-slate-800/50 hover:bg-slate-700/50 text-slate-200 rounded-xl text-sm font-semibold transition-all border border-slate-700/50"
+              >
+                ➕ Add Meteora Position
+              </Link>
               <button
                 onClick={syncWallet}
                 disabled={syncing || loadingStats}
