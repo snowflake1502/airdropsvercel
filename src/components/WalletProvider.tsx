@@ -4,7 +4,7 @@ import { FC, ReactNode, useMemo, useState, useEffect } from 'react'
 import { ConnectionProvider, WalletProvider } from '@solana/wallet-adapter-react'
 import { WalletAdapterNetwork } from '@solana/wallet-adapter-base'
 import { WalletModalProvider } from '@solana/wallet-adapter-react-ui'
-import { SolflareWalletAdapter } from '@solana/wallet-adapter-wallets'
+import { PhantomWalletAdapter, SolflareWalletAdapter } from '@solana/wallet-adapter-wallets'
 
 // Import wallet adapter CSS
 import '@solana/wallet-adapter-react-ui/styles.css'
@@ -29,10 +29,11 @@ export const WalletContextProvider: FC<WalletContextProviderProps> = ({ children
     }
   }, [])
 
-  // Phantom is now a standard wallet and will be auto-detected
-  // Only explicitly register Solflare for now
+  // Explicitly register Phantom to ensure it shows up in the wallet modal.
+  // Relying on wallet-standard auto-detection is inconsistent across browsers/extensions.
   const wallets = useMemo(
     () => [
+      new PhantomWalletAdapter(),
       new SolflareWalletAdapter(),
     ],
     [network]
